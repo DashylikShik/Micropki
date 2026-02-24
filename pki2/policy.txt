@@ -1,0 +1,33 @@
+MICROPKI CERTIFICATE POLICY DOCUMENT
+==================================================
+
+Policy Version: 1.0
+Creation Date: 2026-02-24T15:34:05+00:00
+
+CERTIFICATE AUTHORITY INFORMATION
+------------------------------
+CA Name (Subject DN): CN=Test Root CA,O=Test Organization
+Certificate Serial Number: 0x226018479AED68BD21CAE720684060FCD35F3
+Valid From: 2026-02-24T15:34:05+00:00
+Valid Until: 2036-02-22T15:34:05+00:00
+Validity Period: 3650 days
+
+CRYPTOGRAPHIC PARAMETERS
+------------------------------
+Key Algorithm: RSA
+Key Size: 4096 bits
+Signature Algorithm: SHA-256 with RSA
+Certificate Version: X.509 v3
+
+CERTIFICATE PURPOSE
+------------------------------
+Root CA for MicroPKI demonstration and testing.
+This CA is intended for educational and development
+purposes only. Not for production use.
+
+CERTIFICATE EXTENSIONS
+------------------------------
+Basic Constraints: CA=TRUE (Critical)
+Key Usage: keyCertSign, cRLSign (Critical)
+Subject Key Identifier: Present
+Authority Key Identifier: Present
