@@ -1,0 +1,12 @@
+2026-02-24T18:34:04.700 - INFO - Starting Root CA initialization
+2026-02-24T18:34:04.703 - INFO - Created directories: pki2\private, pki2\certs
+2026-02-24T18:34:04.704 - INFO - [REDACTED: sensitive information]
+2026-02-24T18:34:04.704 - INFO - Generating RSA-4096 key pair
+2026-02-24T18:34:05.056 - INFO - Key generation completed
+2026-02-24T18:34:05.056 - INFO - Creating self-signed certificate
+2026-02-24T18:34:05.064 - INFO - Certificate signing completed
+2026-02-24T18:34:05.064 - INFO - Saving encrypted private key to pki2\private\ca.key.pem
+2026-02-24T18:34:05.066 - INFO - Saving certificate to pki2\certs\ca.cert.pem
+2026-02-24T18:34:05.067 - INFO - Creating policy document at pki2\policy.txt
+2026-02-24T18:34:05.067 - INFO - Policy document created
+2026-02-24T18:34:05.072 - INFO - Root CA initialization completed successfully

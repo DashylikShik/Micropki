@@ -1,0 +1,19 @@
+2026-02-24T18:31:08.493 - INFO - Starting Root CA initialization
+2026-02-24T18:31:08.494 - INFO - Created directories: pki\private, pki\certs
+2026-02-24T18:31:08.494 - INFO - [REDACTED: sensitive information]
+2026-02-24T18:31:08.494 - INFO - Generating RSA-4096 key pair
+2026-02-24T18:31:09.155 - INFO - Key generation completed
+2026-02-24T18:31:09.156 - INFO - Creating self-signed certificate
+2026-02-24T18:31:09.156 - ERROR - Failed to initialize Root CA: The serial number should not be more than 159 bits.
+2026-02-24T18:31:58.622 - INFO - Starting Root CA initialization
+2026-02-24T18:31:58.623 - INFO - Created directories: pki\private, pki\certs
+2026-02-24T18:31:58.624 - INFO - [REDACTED: sensitive information]
+2026-02-24T18:31:58.629 - INFO - Generating RSA-4096 key pair
+2026-02-24T18:31:58.775 - INFO - Key generation completed
+2026-02-24T18:31:58.775 - INFO - Creating self-signed certificate
+2026-02-24T18:31:58.784 - INFO - Certificate signing completed
+2026-02-24T18:31:58.784 - INFO - Saving encrypted private key to pki\private\ca.key.pem
+2026-02-24T18:31:58.786 - INFO - Saving certificate to pki\certs\ca.cert.pem
+2026-02-24T18:31:58.787 - INFO - Creating policy document at pki\policy.txt
+2026-02-24T18:31:58.787 - INFO - Policy document created
+2026-02-24T18:31:58.787 - INFO - Root CA initialization completed successfully
