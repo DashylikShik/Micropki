@@ -56,6 +56,7 @@ source venv/bin/activate
 3. Install dependencies:
 pip install -r requirements.txt
 pip install -e .
+pip install flask
 
 4. Создание файла с паролем
 mkdir secrets
@@ -114,3 +115,59 @@ micropki ca verify-chain --leaf pki\certs\example.com.cert.pem --intermediate pk
 
 # 6. Запуск тестов:
 pytest tests/test_sprint2.py -v
+
+
+# sprint 3
+# 1. Удалить старую БД
+del pki\micropki.db
+
+# 2. Инициализировать новую БД
+micropki db init --db-path ./pki/micropki.db --force
+
+# 3. Создать Root CA
+micropki ca init --subject "CN=Root CA" --key-type rsa --key-size 4096 --passphrase-file secrets\ca.pass --out-dir pki --validity-days 365 --force --db-path ./pki/micropki.db
+
+# 4. Создать Intermediate CA
+micropki ca issue-intermediate --root-cert pki\certs\ca.cert.pem --root-key pki\private\ca.key.pem --root-pass-file secrets\ca.pass --subject "CN=Intermediate CA" --key-type rsa --key-size 4096 --passphrase-file secrets\intermediate.pass --out-dir pki --validity-days 365 --pathlen 0 --db-path ./pki/micropki.db
+
+# 5. Выпустить сертификат
+micropki ca issue-cert --ca-cert pki\certs\intermediate.cert.pem --ca-key pki\private\intermediate.key.pem --ca-pass-file secrets\intermediate.pass --template server --subject "CN=example.com" --san dns:example.com --out-dir pki\certs --validity-days 365 --db-path ./pki/micropki.db
+
+# 6. Проверить список
+micropki ca list-certs --db-path ./pki/micropki.db --format table
+
+# 7. Показать сертификат по серийному номеру
+micropki ca show-cert BC807B10E7655CD --db-path ./pki/micropki.db
+
+# 8. Список в формате JSON
+micropki ca list-certs --db-path ./pki/micropki.db --format json
+
+# 9. Список в формате CSV
+micropki ca list-certs --db-path ./pki/micropki.db --format csv
+
+# 10. Фильтр по статусу
+micropki ca list-certs --db-path ./pki/micropki.db --status valid --format table
+
+# 11. Запустите HTTP сервер
+В этом же окне (сервер будет работать):
+micropki repo serve --host 127.0.0.1 --port 8080 --db-path ./pki/micropki.db --cert-dir ./pki/certs
+
+# 12. В другом окне терминала проверка API:
+
+cd C:\Users\Пользователь\Desktop\project_root
+venv\Scripts\activate
+
+# Проверка здоровья
+curl http://127.0.0.1:8080/health
+
+# Получить корневой сертификат
+curl http://127.0.0.1:8080/ca/root
+
+# Получить промежуточный сертификат
+curl http://127.0.0.1:8080/ca/intermediate
+
+# Получить сертификат по серийному номеру
+curl http://127.0.0.1:8080/certificate/BC807B10E7655CD
+
+# Проверить CRL (плейсхолдер для Sprint 4)
+curl http://127.0.0.1:8080/crl

@@ -16,16 +16,60 @@ from micropki import crypto_utils, certificates, logger
 class CertificateAuthority:
     """Certificate Authority implementation."""
     
-    def __init__(self, log_file: OptionalType[str] = None):
+    def __init__(self, log_file: OptionalType[str] = None, db_path: OptionalType[str] = None):
         """
         Initialize Certificate Authority.
         
         Args:
             log_file: Optional path to log file
+            db_path: Optional path to SQLite database for certificate storage
         """
         self.logger = logger.setup_logger(log_file)
         self.private_key: OptionalType[PrivateKeyTypes] = None
         self.certificate: OptionalType[x509.Certificate] = None
+        self.db_path = db_path
+        self.db = None
+        
+        if db_path:
+            from micropki.database import CertificateDatabase
+            self.db = CertificateDatabase(db_path, log_file)
+    
+    def _insert_certificate_to_db(
+        self,
+        cert: x509.Certificate,
+        cert_pem: str,
+        subject: str,
+        issuer: str,
+        status: str = 'valid'
+    ) -> None:
+        """
+        Insert certificate into database if configured.
+        
+        Args:
+            cert: Certificate object
+            cert_pem: PEM-encoded certificate
+            subject: Subject DN
+            issuer: Issuer DN
+            status: Certificate status ('valid', 'revoked', 'expired')
+        """
+        if not self.db:
+            return
+        
+        serial_hex = hex(cert.serial_number)[2:].upper()
+        
+        cert_data = {
+            'serial_hex': serial_hex,
+            'serial_int': cert.serial_number,
+            'subject': subject,
+            'issuer': issuer,
+            'not_before': cert.not_valid_before_utc.isoformat(),
+            'not_after': cert.not_valid_after_utc.isoformat(),
+            'cert_pem': cert_pem,
+            'status': status
+        }
+        
+        self.db.insert_certificate(cert_data)
+        self.logger.info(f"Certificate inserted into database: serial={serial_hex}")
     
     def init_root_ca(
         self,
@@ -109,8 +153,18 @@ class CertificateAuthority:
             self.logger.info(f"Saving certificate to {cert_path}")
             
             cert_pem = certificates.certificate_to_pem(self.certificate)
+            cert_pem_str = cert_pem.decode('utf-8')
             with open(cert_path, 'wb') as f:
                 f.write(cert_pem)
+            
+            # Insert into database if configured
+            self._insert_certificate_to_db(
+                cert=self.certificate,
+                cert_pem=cert_pem_str,
+                subject=subject,
+                issuer=subject,  # Self-signed
+                status='valid'
+            )
             
             # Create policy document
             self._create_policy_document(out_dir, subject, key_type, key_size, validity_days)
@@ -341,8 +395,18 @@ class CertificateAuthority:
             self.logger.info(f"Saving Intermediate CA certificate to {cert_path}")
             
             cert_pem = certificates.certificate_to_pem(intermediate_cert)
+            cert_pem_str = cert_pem.decode('utf-8')
             with open(cert_path, 'wb') as f:
                 f.write(cert_pem)
+            
+            # Insert into database if configured
+            self._insert_certificate_to_db(
+                cert=intermediate_cert,
+                cert_pem=cert_pem_str,
+                subject=subject,
+                issuer=root_cert.subject.rfc4514_string(),
+                status='valid'
+            )
             
             # Update policy document
             self._update_policy_with_intermediate(out_dir, subject, key_type, key_size, 
@@ -436,8 +500,14 @@ class CertificateAuthority:
             # Create certificate extensions from template
             extensions = template.get_extensions(parsed_sans)
             
-            # Generate serial number
-            serial_number = crypto_utils.generate_serial_number()
+            # Generate unique serial number using database if available
+            if self.db:
+                from micropki.serial import SerialGenerator
+                serial_gen = SerialGenerator(self.db_path)
+                serial_int, serial_hex = serial_gen.generate_serial()
+                serial_number = serial_int
+            else:
+                serial_number = crypto_utils.generate_serial_number()
             
             # Create certificate
             self.logger.info("Creating end-entity certificate")
@@ -480,6 +550,21 @@ class CertificateAuthority:
                 
                 self.logger.warning("Private key stored unencrypted! Handle with care.")
             
+            # Insert into database if configured
+            if self.db:
+                # Read the certificate PEM
+                with open(cert_path, 'rb') as f:
+                    cert_pem = f.read()
+                cert_pem_str = cert_pem.decode('utf-8')
+                
+                self._insert_certificate_to_db(
+                    cert=cert,
+                    cert_pem=cert_pem_str,
+                    subject=parsed_subject,
+                    issuer=ca_cert.subject.rfc4514_string(),
+                    status='valid'
+                )
+            
             self.logger.info(f"Certificate issued: serial={hex(serial_number)}, "
                            f"subject={parsed_subject}, template={template_name}, "
                            f"sans={san_list}")
@@ -499,7 +584,14 @@ class CertificateAuthority:
     ) -> x509.Certificate:
         """Sign a CSR with a CA certificate."""
         
-        serial_number = crypto_utils.generate_serial_number()
+        # Generate unique serial number using database if available
+        if self.db:
+            from micropki.serial import SerialGenerator
+            serial_gen = SerialGenerator(self.db_path)
+            serial_int, serial_hex = serial_gen.generate_serial()
+            serial_number = serial_int
+        else:
+            serial_number = crypto_utils.generate_serial_number()
         
         not_before = datetime.datetime.now(datetime.timezone.utc)
         not_after = not_before + datetime.timedelta(days=validity_days)

@@ -1,2 +1,0 @@
-[console_scripts]
-micropki = micropki.cli:main

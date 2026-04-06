@@ -84,18 +84,54 @@ Examples:
     --leaf ./pki/certs/example.com.cert.pem \\
     --intermediate ./pki/certs/intermediate.cert.pem \\
     --root ./pki/certs/ca.cert.pem
+
+  # Database init (Sprint 3)
+  micropki db init --db-path ./pki/micropki.db
+
+  # List certificates (Sprint 3)
+  micropki ca list-certs --status valid --format table
+
+  # Show certificate by serial (Sprint 3)
+  micropki ca show-cert 2A7F...
+
+  # Start repository server (Sprint 3)
+  micropki repo serve --host 127.0.0.1 --port 8080 --db-path ./pki/micropki.db --cert-dir ./pki/certs
         """
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     subparsers.required = True
     
-    # CA commands
+    # ============= DATABASE COMMANDS (SPRINT 3) =============
+    db_parser = subparsers.add_parser('db', help='Database operations')
+    db_subparsers = db_parser.add_subparsers(dest='db_command', help='DB commands')
+    db_subparsers.required = True
+    
+    # db init command
+    init_db_parser = db_subparsers.add_parser('init', help='Initialize certificate database')
+    init_db_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path (default: ./pki/micropki.db)')
+    init_db_parser.add_argument('--force', action='store_true', help='Force recreate database (drop existing tables)')
+    init_db_parser.add_argument('--log-file', help='Optional path to log file')
+    
+    # ============= REPOSITORY COMMANDS (SPRINT 3) =============
+    repo_parser = subparsers.add_parser('repo', help='Repository server operations')
+    repo_subparsers = repo_parser.add_subparsers(dest='repo_command', help='Repo commands')
+    repo_subparsers.required = True
+    
+    # repo serve command
+    serve_parser = repo_subparsers.add_parser('serve', help='Start repository HTTP server')
+    serve_parser.add_argument('--host', default='127.0.0.1', help='Bind address (default: 127.0.0.1)')
+    serve_parser.add_argument('--port', type=int, default=8080, help='TCP port (default: 8080)')
+    serve_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path (default: ./pki/micropki.db)')
+    serve_parser.add_argument('--cert-dir', default='./pki/certs', help='Certificate directory (default: ./pki/certs)')
+    serve_parser.add_argument('--log-file', help='Optional path to log file')
+    
+    #CA COMMANDS 
     ca_parser = subparsers.add_parser('ca', help='Certificate Authority operations')
     ca_subparsers = ca_parser.add_subparsers(dest='ca_command', help='CA commands')
     ca_subparsers.required = True
     
-    # ============= SPRINT 1 COMMANDS =============
+    # SPRINT 1 COMMANDS
     
     # ca init command
     init_parser = ca_subparsers.add_parser('init', help='Initialize a self-signed Root CA')
@@ -141,6 +177,11 @@ Examples:
         action='store_true',
         help='Force overwrite existing files without asking'
     )
+    init_parser.add_argument(
+        '--db-path',
+        default='./pki/micropki.db',
+        help='Database file path for storing certificate records (default: ./pki/micropki.db)'
+    )
     
     # ca verify command
     verify_parser = ca_subparsers.add_parser('verify', help='Verify a certificate')
@@ -176,7 +217,7 @@ Examples:
         help='Optional path to log file'
     )
     
-    # ============= SPRINT 2 COMMANDS =============
+    #SPRINT 2 COMMANDS
     
     # ca issue-intermediate command
     intermediate_parser = ca_subparsers.add_parser(
@@ -196,6 +237,8 @@ Examples:
     intermediate_parser.add_argument('--pathlen', default=0, type=int, 
                                       help='Path length constraint (default: 0)')
     intermediate_parser.add_argument('--log-file')
+    intermediate_parser.add_argument('--db-path', default='./pki/micropki.db',
+                                      help='Database file path for storing certificate records (default: ./pki/micropki.db)')
     
     # ca issue-cert command
     issue_parser = ca_subparsers.add_parser(
@@ -213,6 +256,8 @@ Examples:
     issue_parser.add_argument('--validity-days', default=365, type=positive_int)
     issue_parser.add_argument('--csr', help='Optional external CSR file')
     issue_parser.add_argument('--log-file')
+    issue_parser.add_argument('--db-path', default='./pki/micropki.db',
+                               help='Database file path for storing certificate records (default: ./pki/micropki.db)')
     
     # ca verify-chain command
     chain_parser = ca_subparsers.add_parser(
@@ -224,13 +269,66 @@ Examples:
     chain_parser.add_argument('--root', required=True, help='Root certificate')
     chain_parser.add_argument('--log-file')
     
+    #SPRINT 3 COMMANDS
+    
+    # ca list-certs command
+    list_parser = ca_subparsers.add_parser('list-certs', help='List certificates in database')
+    list_parser.add_argument('--status', choices=['valid', 'revoked', 'expired'], 
+                              help='Filter by status')
+    list_parser.add_argument('--format', default='table', choices=['table', 'json', 'csv'], 
+                              help='Output format (default: table)')
+    list_parser.add_argument('--limit', type=int, default=50, 
+                              help='Maximum number of certificates (default: 50)')
+    list_parser.add_argument('--db-path', default='./pki/micropki.db', 
+                              help='Database file path (default: ./pki/micropki.db)')
+    list_parser.add_argument('--log-file', help='Optional path to log file')
+    
+    # ca show-cert command
+    show_parser = ca_subparsers.add_parser('show-cert', help='Show certificate by serial number')
+    show_parser.add_argument('serial', help='Certificate serial number (hex)')
+    show_parser.add_argument('--db-path', default='./pki/micropki.db', 
+                              help='Database file path (default: ./pki/micropki.db)')
+    show_parser.add_argument('--log-file', help='Optional path to log file')
+    
     args = parser.parse_args()
     
     try:
-        if args.command == 'ca':
-            ca = CertificateAuthority(log_file=getattr(args, 'log_file', None))
+        #SPRINT 3: DB COMMANDS
+        if args.command == 'db':
+            from micropki.database import CertificateDatabase
             
-            # ============= SPRINT 1 COMMANDS HANDLERS =============
+            if args.db_command == 'init':
+                db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
+                db.init_schema(force=args.force)
+                print(f"[OK] Database initialized successfully: {args.db_path}")
+        
+        #PRINT 3: REPOSITORY COMMANDS
+        elif args.command == 'repo':
+            from micropki.repository import RepositoryServer
+            
+            if args.repo_command == 'serve':
+                server = RepositoryServer(
+                    db_path=args.db_path,
+                    cert_dir=args.cert_dir,
+                    host=args.host,
+                    port=args.port,
+                    log_file=args.log_file
+                )
+                print(f"[INFO] Starting repository server on {args.host}:{args.port}")
+                print(f"[INFO] Database: {args.db_path}")
+                print(f"[INFO] Certificate directory: {args.cert_dir}")
+                print("[INFO] Press Ctrl+C to stop")
+                try:
+                    server.start()
+                except KeyboardInterrupt:
+                    print("\n[INFO] Server stopped")
+        
+        elif args.command == 'ca':
+            # Create CA instance with database support if db_path provided
+            db_path = getattr(args, 'db_path', None)
+            ca = CertificateAuthority(log_file=getattr(args, 'log_file', None), db_path=db_path)
+            
+            # SPRINT 1 COMMANDS HANDLERS 
             
             if args.ca_command == 'init':
                 # Validate key arguments
@@ -312,7 +410,8 @@ Examples:
                     print(f"[FAILED] Key does not match certificate", file=sys.stderr)
                     sys.exit(1)
             
-            # SPRINT 2
+            # SPRINT 2 COMMANDS HANDLERS
+            
             elif args.ca_command == 'issue-intermediate':
                 # Validate key arguments
                 validate_key_arguments(args)
@@ -389,6 +488,58 @@ Examples:
                     print("[FAILED] Certificate chain validation failed:", file=sys.stderr)
                     for err in errors:
                         print(f"  - {err}", file=sys.stderr)
+                    sys.exit(1)
+            
+            #SPRINT 3 COMMANDS HANDLERS
+            
+            elif args.ca_command == 'list-certs':
+                from micropki.database import CertificateDatabase
+                
+                db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
+                db.update_expired_status()  # Update expired status before listing
+                
+                certs = db.list_certificates(status=args.status, limit=args.limit)
+                
+                if args.format == 'json':
+                    import json
+                    output = []
+                    for cert in certs:
+                        output.append({
+                            'serial': cert['serial_hex'],
+                            'subject': cert['subject'],
+                            'issuer': cert['issuer'],
+                            'not_before': cert['not_before'],
+                            'not_after': cert['not_after'],
+                            'status': cert['status']
+                        })
+                    print(json.dumps(output, indent=2))
+                
+                elif args.format == 'csv':
+                    print("SERIAL,SUBJECT,ISSUER,NOT_BEFORE,NOT_AFTER,STATUS")
+                    for cert in certs:
+                        print(f"{cert['serial_hex']},{cert['subject']},{cert['issuer']},"
+                              f"{cert['not_before']},{cert['not_after']},{cert['status']}")
+                
+                else:  # table format
+                    print(f"{'SERIAL':<20} {'SUBJECT':<35} {'STATUS':<10} {'EXPIRES':<20}")
+                    print("=" * 100)
+                    for cert in certs:
+                        serial = cert['serial_hex'][:18] + "..." if len(cert['serial_hex']) > 18 else cert['serial_hex']
+                        subject = cert['subject'][:32] + "..." if len(cert['subject']) > 32 else cert['subject']
+                        expires = cert['not_after'][:10]
+                        print(f"{serial:<20} {subject:<35} {cert['status']:<10} {expires:<20}")
+                    print(f"Total: {len(certs)} certificates")
+            
+            elif args.ca_command == 'show-cert':
+                from micropki.database import CertificateDatabase
+                
+                db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
+                cert = db.get_certificate_by_serial(args.serial)
+                
+                if cert:
+                    print(cert['cert_pem'])
+                else:
+                    print(f"[ERROR] Certificate with serial {args.serial} not found", file=sys.stderr)
                     sys.exit(1)
     
     except Exception as e:

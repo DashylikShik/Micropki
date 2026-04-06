@@ -1,0 +1,17 @@
+# Python build
+*.egg-info/
+*.egg
+
+# PKI generated files (Sprint 1-3)
+pki/
+secrets/
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+# Certificate and key files
+*.pem
+*.key
+*.cert
+*.csr
