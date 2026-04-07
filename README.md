@@ -171,3 +171,46 @@ curl http://127.0.0.1:8080/certificate/BC807B10E7655CD
 
 # Проверить CRL (плейсхолдер для Sprint 4)
 curl http://127.0.0.1:8080/crl
+
+
+# sprint 4
+# 1. Пересоздайте базу данных (с новой схемой)
+micropki db init --db-path ./pki/micropki.db --force
+
+# 2. Создайте Root CA
+micropki ca init --subject "CN=Root CA" --key-type rsa --key-size 4096 --passphrase-file secrets\ca.pass --out-dir pki --validity-days 365 --force --db-path ./pki/micropki.db
+
+# 3. Создайте Intermediate CA
+micropki ca issue-intermediate --root-cert pki\certs\ca.cert.pem --root-key pki\private\ca.key.pem --root-pass-file secrets\ca.pass --subject "CN=Intermediate CA" --key-type rsa --key-size 4096 --passphrase-file secrets\intermediate.pass --out-dir pki --validity-days 365 --pathlen 0 --db-path ./pki/micropki.db
+
+# 4. Выпустите сертификат
+micropki ca issue-cert --ca-cert pki\certs\intermediate.cert.pem --ca-key pki\private\intermediate.key.pem --ca-pass-file secrets\intermediate.pass --template server --subject "CN=example.com" --san dns:example.com --out-dir pki\certs --validity-days 365 --db-path ./pki/micropki.db
+
+# 5. Посмотрите список сертификатов
+micropki ca list-certs --db-path ./pki/micropki.db --format table
+
+# 6. Отзовите сертификат (используйте серийный номер из списка)
+micropki ca revoke <сюда номерок> --reason keyCompromise --db-path ./pki/micropki.db
+
+# 7. Проверьте, что статус изменился
+micropki ca list-certs --db-path ./pki/micropki.db --format table
+
+# 8. Сгенерируйте CRL
+micropki ca gen-crl --ca intermediate --next-update 7 --out-dir pki --db-path ./pki/micropki.db
+
+# 9. Проверьте CRL через OpenSSL (если установлен)
+openssl crl -in pki\crl\intermediate.crl.pem -text -noout
+
+# 10. Запустите HTTP сервер
+micropki repo serve --host 127.0.0.1 --port 8080 --db-path ./pki/micropki.db --cert-dir ./pki/certs
+
+# Проверка CRL через HTTP(другое окно)
+curl http://127.0.0.1:8080/crl?ca=intermediate
+curl http://127.0.0.1:8080/crl/intermediate.crl
+
+# Сохранить CRL в файл
+curl -o test.crl http://127.0.0.1:8080/crl/intermediate.crl
+# Посмотреть содержимое CRL
+type test.crl
+# запуск тестов
+notepad tests\test_revocation.py

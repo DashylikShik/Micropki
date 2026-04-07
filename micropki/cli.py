@@ -96,13 +96,19 @@ Examples:
 
   # Start repository server (Sprint 3)
   micropki repo serve --host 127.0.0.1 --port 8080 --db-path ./pki/micropki.db --cert-dir ./pki/certs
+
+  # Revoke certificate (Sprint 4)
+  micropki ca revoke 2A7F... --reason keyCompromise
+
+  # Generate CRL (Sprint 4)
+  micropki ca gen-crl --ca intermediate --next-update 7
         """
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     subparsers.required = True
     
-    # ============= DATABASE COMMANDS (SPRINT 3) =============
+    # DATABASE COMMANDS (SPRINT 3)
     db_parser = subparsers.add_parser('db', help='Database operations')
     db_subparsers = db_parser.add_subparsers(dest='db_command', help='DB commands')
     db_subparsers.required = True
@@ -113,7 +119,7 @@ Examples:
     init_db_parser.add_argument('--force', action='store_true', help='Force recreate database (drop existing tables)')
     init_db_parser.add_argument('--log-file', help='Optional path to log file')
     
-    # ============= REPOSITORY COMMANDS (SPRINT 3) =============
+    # REPOSITORY COMMANDS (SPRINT 3)
     repo_parser = subparsers.add_parser('repo', help='Repository server operations')
     repo_subparsers = repo_parser.add_subparsers(dest='repo_command', help='Repo commands')
     repo_subparsers.required = True
@@ -126,12 +132,12 @@ Examples:
     serve_parser.add_argument('--cert-dir', default='./pki/certs', help='Certificate directory (default: ./pki/certs)')
     serve_parser.add_argument('--log-file', help='Optional path to log file')
     
-    #CA COMMANDS 
+    #  CA COMMANDS
     ca_parser = subparsers.add_parser('ca', help='Certificate Authority operations')
     ca_subparsers = ca_parser.add_subparsers(dest='ca_command', help='CA commands')
     ca_subparsers.required = True
     
-    # SPRINT 1 COMMANDS
+    #  SPRINT 1 COMMANDS
     
     # ca init command
     init_parser = ca_subparsers.add_parser('init', help='Initialize a self-signed Root CA')
@@ -217,8 +223,7 @@ Examples:
         help='Optional path to log file'
     )
     
-    #SPRINT 2 COMMANDS
-    
+    #  SPRINT 2 COMMANDS
     # ca issue-intermediate command
     intermediate_parser = ca_subparsers.add_parser(
         'issue-intermediate',
@@ -269,8 +274,7 @@ Examples:
     chain_parser.add_argument('--root', required=True, help='Root certificate')
     chain_parser.add_argument('--log-file')
     
-    #SPRINT 3 COMMANDS
-    
+    #  SPRINT 3 COMMANDS 
     # ca list-certs command
     list_parser = ca_subparsers.add_parser('list-certs', help='List certificates in database')
     list_parser.add_argument('--status', choices=['valid', 'revoked', 'expired'], 
@@ -290,10 +294,35 @@ Examples:
                               help='Database file path (default: ./pki/micropki.db)')
     show_parser.add_argument('--log-file', help='Optional path to log file')
     
+    #  SPRINT 4 COMMANDS 
+    
+    # ca revoke command
+    revoke_parser = ca_subparsers.add_parser('revoke', help='Revoke a certificate')
+    revoke_parser.add_argument('serial', help='Certificate serial number (hex)')
+    revoke_parser.add_argument('--reason', default='unspecified',
+                                choices=['unspecified', 'keyCompromise', 'cACompromise', 'affiliationChanged',
+                                        'superseded', 'cessationOfOperation', 'certificateHold', 'removeFromCRL',
+                                        'privilegeWithdrawn', 'aACompromise'],
+                                help='Revocation reason (default: unspecified)')
+    revoke_parser.add_argument('--force', action='store_true', help='Skip confirmation prompts')
+    revoke_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path')
+    revoke_parser.add_argument('--log-file', help='Optional path to log file')
+    
+    # ca gen-crl command
+    gen_crl_parser = ca_subparsers.add_parser('gen-crl', help='Generate Certificate Revocation List')
+    gen_crl_parser.add_argument('--ca', required=True, choices=['root', 'intermediate'],
+                                 help='CA to generate CRL for (root or intermediate)')
+    gen_crl_parser.add_argument('--next-update', type=int, default=7,
+                                 help='Days until next CRL update (default: 7)')
+    gen_crl_parser.add_argument('--out-file', help='Output file path (optional)')
+    gen_crl_parser.add_argument('--out-dir', default='./pki', help='Output directory')
+    gen_crl_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path')
+    gen_crl_parser.add_argument('--log-file', help='Optional path to log file')
+    
     args = parser.parse_args()
     
     try:
-        #SPRINT 3: DB COMMANDS
+        # SPRINT 3: DB COMMANDS
         if args.command == 'db':
             from micropki.database import CertificateDatabase
             
@@ -302,7 +331,7 @@ Examples:
                 db.init_schema(force=args.force)
                 print(f"[OK] Database initialized successfully: {args.db_path}")
         
-        #PRINT 3: REPOSITORY COMMANDS
+        #SPRINT 3: REPOSITORY COMMANDS 
         elif args.command == 'repo':
             from micropki.repository import RepositoryServer
             
@@ -323,12 +352,13 @@ Examples:
                 except KeyboardInterrupt:
                     print("\n[INFO] Server stopped")
         
+        # CA COMMANDS 
         elif args.command == 'ca':
             # Create CA instance with database support if db_path provided
             db_path = getattr(args, 'db_path', None)
             ca = CertificateAuthority(log_file=getattr(args, 'log_file', None), db_path=db_path)
             
-            # SPRINT 1 COMMANDS HANDLERS 
+            #SPRINT 1 COMMANDS HANDLERS 
             
             if args.ca_command == 'init':
                 # Validate key arguments
@@ -522,7 +552,6 @@ Examples:
                 
                 else:  # table format
                     print(f"{'SERIAL':<20} {'SUBJECT':<35} {'STATUS':<10} {'EXPIRES':<20}")
-                    print("=" * 100)
                     for cert in certs:
                         serial = cert['serial_hex'][:18] + "..." if len(cert['serial_hex']) > 18 else cert['serial_hex']
                         subject = cert['subject'][:32] + "..." if len(cert['subject']) > 32 else cert['subject']
@@ -541,6 +570,116 @@ Examples:
                 else:
                     print(f"[ERROR] Certificate with serial {args.serial} not found", file=sys.stderr)
                     sys.exit(1)
+            
+            # SPRINT 4 COMMANDS HANDLERS
+            
+            elif args.ca_command == 'revoke':
+                from micropki.database import CertificateDatabase
+                from micropki.revocation import get_reason_code
+                
+                db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
+                
+                # Check if certificate exists
+                cert = db.get_certificate_by_serial(args.serial)
+                if not cert:
+                    print(f"[ERROR] Certificate with serial {args.serial} not found", file=sys.stderr)
+                    sys.exit(1)
+                
+                # Check if already revoked
+                if cert['status'] == 'revoked':
+                    print(f"[WARNING] Certificate {args.serial} is already revoked", file=sys.stderr)
+                    sys.exit(0)
+                
+                # Confirm revocation
+                if not args.force:
+                    print(f"Certificate to revoke:")
+                    print(f"  Serial: {cert['serial_hex']}")
+                    print(f"  Subject: {cert['subject']}")
+                    print(f"  Issuer: {cert['issuer']}")
+                    print(f"  Reason: {args.reason}")
+                    print()
+                    response = input("Are you sure you want to revoke this certificate? (y/N): ").strip().lower()
+                    if response != 'y' and response != 'yes':
+                        print("[CANCELLED] Revocation cancelled.")
+                        sys.exit(0)
+                
+                # Revoke certificate
+                try:
+                    reason_code = get_reason_code(args.reason)
+                    success = db.revoke_certificate(args.serial, args.reason)
+                    if success:
+                        print(f"[OK] Certificate {args.serial} revoked successfully (reason: {args.reason})")
+                    else:
+                        print(f"[ERROR] Failed to revoke certificate", file=sys.stderr)
+                        sys.exit(1)
+                except ValueError as e:
+                    print(f"[ERROR] {str(e)}", file=sys.stderr)
+                    sys.exit(1)
+            
+            elif args.ca_command == 'gen-crl':
+                from micropki.database import CertificateDatabase
+                from micropki.revocation import CRLGenerator
+                from micropki import certificates
+                
+                # Determine paths
+                if args.ca == 'root':
+                    ca_cert_path = os.path.join(args.out_dir, 'certs', 'ca.cert.pem')
+                    ca_key_path = os.path.join(args.out_dir, 'private', 'ca.key.pem')
+                    ca_pass_file = os.path.join(os.path.dirname(args.out_dir), 'secrets', 'ca.pass')
+                    default_out = os.path.join(args.out_dir, 'crl', 'root.crl.pem')
+                else:  # intermediate
+                    ca_cert_path = os.path.join(args.out_dir, 'certs', 'intermediate.cert.pem')
+                    ca_key_path = os.path.join(args.out_dir, 'private', 'intermediate.key.pem')
+                    ca_pass_file = os.path.join(os.path.dirname(args.out_dir), 'secrets', 'intermediate.pass')
+                    default_out = os.path.join(args.out_dir, 'crl', 'intermediate.crl.pem')
+                
+                # Check files exist
+                if not os.path.exists(ca_cert_path):
+                    print(f"[ERROR] CA certificate not found: {ca_cert_path}", file=sys.stderr)
+                    sys.exit(1)
+                if not os.path.exists(ca_key_path):
+                    print(f"[ERROR] CA private key not found: {ca_key_path}", file=sys.stderr)
+                    sys.exit(1)
+                if not os.path.exists(ca_pass_file):
+                    print(f"[ERROR] CA passphrase file not found: {ca_pass_file}", file=sys.stderr)
+                    sys.exit(1)
+                
+                # Create CRL directory
+                crl_dir = os.path.join(args.out_dir, 'crl')
+                os.makedirs(crl_dir, exist_ok=True)
+                
+                # Read passphrase
+                with open(ca_pass_file, 'rb') as f:
+                    ca_passphrase = f.read().strip()
+                
+                # Load CA certificate to get subject
+                with open(ca_cert_path, 'rb') as f:
+                    ca_cert = certificates.load_certificate(f.read())
+                ca_subject_dn = ca_cert.subject.rfc4514_string()
+                
+                # Initialize database and CRL generator
+                db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
+                crl_gen = CRLGenerator(
+                    db=db,
+                    ca_cert_path=ca_cert_path,
+                    ca_key_path=ca_key_path,
+                    ca_passphrase=ca_passphrase,
+                    log_file=getattr(args, 'log_file', None)
+                )
+                
+                # Determine output file
+                out_file = args.out_file if args.out_file else default_out
+                
+                # Generate CRL
+                crl_gen.generate_crl(
+                    ca_subject=ca_subject_dn,
+                    next_update_days=args.next_update,
+                    out_file=out_file
+                )
+                
+                print(f"[OK] CRL generated for {args.ca} CA")
+                print(f"  File: {out_file}")
+                print(f"  Next update: {args.next_update} days")
     
     except Exception as e:
         print(f"[ERROR] {str(e)}", file=sys.stderr)

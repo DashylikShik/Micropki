@@ -47,9 +47,10 @@ class CertificateDatabase:
             if force:
                 conn.execute("DROP TABLE IF EXISTS certificates")
                 conn.execute("DROP TABLE IF EXISTS serial_tracker")
+                conn.execute("DROP TABLE IF EXISTS crl_metadata")
                 self.logger.info("Dropped existing tables")
             
-            # Certificates table - using TEXT for serial_int to avoid 64-bit overflow
+            # Certificates table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS certificates (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,7 +68,7 @@ class CertificateDatabase:
                 )
             """)
             
-            # Serial tracker table - using TEXT for serial_int
+            # Serial tracker table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS serial_tracker (
                     serial_int TEXT PRIMARY KEY,
@@ -76,10 +77,23 @@ class CertificateDatabase:
                 )
             """)
             
-            # Create indexes for performance
+            # CRL metadata table (Sprint 4)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS crl_metadata (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ca_subject TEXT NOT NULL UNIQUE,
+                    crl_number INTEGER NOT NULL,
+                    last_generated TEXT NOT NULL,
+                    next_update TEXT NOT NULL,
+                    crl_path TEXT NOT NULL
+                )
+            """)
+            
+            # Create indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_serial_hex ON certificates(serial_hex)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON certificates(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_not_after ON certificates(not_after)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_ca_subject ON crl_metadata(ca_subject)")
             
             self.logger.info("Database schema initialized successfully")
 
@@ -132,6 +146,43 @@ class CertificateDatabase:
             self.logger.info(f"Certificate inserted: serial={cert_data['serial_hex']}, "
                         f"subject={cert_data['subject']}")
             return cursor.lastrowid
+        
+    def revoke_certificate(self, serial_hex: str, reason: str) -> bool:
+        """
+        Revoke a certificate.
+        
+        Args:
+            serial_hex: Serial number in hex
+            reason: Revocation reason string
+            
+        Returns:
+            True if revoked, False if not found
+            
+        Raises:
+            ValueError: If certificate already revoked
+        """
+        serial_hex = serial_hex.upper()
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # Check current status
+        cert = self.get_certificate_by_serial(serial_hex)
+        if not cert:
+            self.logger.error(f"Certificate not found: {serial_hex}")
+            return False
+        
+        if cert['status'] == 'revoked':
+            self.logger.warning(f"Certificate already revoked: {serial_hex}")
+            return False
+        
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE certificates 
+                SET status = 'revoked', revocation_reason = ?, revocation_date = ?
+                WHERE serial_hex = ?
+            """, (reason, now, serial_hex))
+            
+            self.logger.info(f"Certificate revoked: serial={serial_hex}, reason={reason}")
+            return True
     
     def get_certificate_by_serial(self, serial_hex: str) -> Optional[Dict[str, Any]]:
         """
@@ -158,6 +209,25 @@ class CertificateDatabase:
             else:
                 self.logger.warning(f"Certificate not found: serial={serial_hex}")
                 return None
+            
+    def get_revoked_certificates_by_issuer(self, issuer_dn: str) -> List[Dict[str, Any]]:
+        """
+        Get revoked certificates issued by a specific CA.
+        
+        Args:
+            issuer_dn: Issuer Distinguished Name
+            
+        Returns:
+            List of revoked certificates
+        """
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT serial_hex, revocation_date, revocation_reason
+                FROM certificates
+                WHERE status = 'revoked' AND issuer = ?
+                ORDER BY revocation_date DESC
+            """, (issuer_dn,))
+            return [dict(row) for row in cursor.fetchall()]
     
     def list_certificates(
         self,

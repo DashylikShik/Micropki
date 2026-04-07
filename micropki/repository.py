@@ -106,14 +106,63 @@ class RepositoryServer:
         
         @self.app.route('/crl', methods=['GET'])
         def get_crl():
-            """GET /crl - CRL endpoint (placeholder for Sprint 4)."""
+            """GET /crl - return CRL (default intermediate, or specify ?ca=root)."""
             self._log_request()
             
-            return Response(
-                "CRL generation not yet implemented. This will be available in Sprint 4.",
-                status=501,
-                mimetype='text/plain'
-            )
+            ca_level = request.args.get('ca', 'intermediate')
+            
+            if ca_level == 'root':
+                crl_path = os.path.join(self.cert_dir, '..', 'crl', 'root.crl.pem')
+            elif ca_level == 'intermediate':
+                crl_path = os.path.join(self.cert_dir, '..', 'crl', 'intermediate.crl.pem')
+            else:
+                return Response(
+                    f"Invalid CA level: {ca_level}. Use 'root' or 'intermediate'.",
+                    status=400,
+                    mimetype='text/plain'
+                )
+            
+            # Also try direct path in crl directory
+            if not os.path.exists(crl_path):
+                alt_path = os.path.join(os.path.dirname(self.cert_dir), 'crl', f'{ca_level}.crl.pem')
+                if os.path.exists(alt_path):
+                    crl_path = alt_path
+            
+            if os.path.exists(crl_path):
+                with open(crl_path, 'rb') as f:
+                    crl_data = f.read()
+                return Response(
+                    crl_data,
+                    status=200,
+                    mimetype='application/pkix-crl'
+                )
+            else:
+                return Response(
+                    f"CRL not found for {ca_level} CA",
+                    status=404,
+                    mimetype='text/plain'
+                )
+        
+        @self.app.route('/crl/<ca>.crl', methods=['GET'])
+        def get_crl_file(ca):
+            """GET /crl/root.crl or /crl/intermediate.crl - return CRL file."""
+            self._log_request()
+            
+            if ca not in ['root', 'intermediate']:
+                return Response("Invalid CA. Use 'root' or 'intermediate'", status=400)
+            
+            crl_path = os.path.join(os.path.dirname(self.cert_dir), 'crl', f'{ca}.crl.pem')
+            
+            if os.path.exists(crl_path):
+                with open(crl_path, 'rb') as f:
+                    crl_data = f.read()
+                return Response(
+                    crl_data,
+                    status=200,
+                    mimetype='application/pkix-crl'
+                )
+            else:
+                return Response(f"CRL not found", status=404)
         
         @self.app.route('/health', methods=['GET'])
         def health():
