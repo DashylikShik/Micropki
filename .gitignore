@@ -1,8 +1,9 @@
 # Python build
 *.egg-info/
 *.egg
+__pycache__/
 
-# PKI generated files (Sprint 1-3)
+# PKI generated files
 pki/
 secrets/
 logs/
@@ -15,7 +16,14 @@ logs/
 *.key
 *.cert
 *.csr
-# CRL files
 *.crl
-*.crl.pem
-pki/crl/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db

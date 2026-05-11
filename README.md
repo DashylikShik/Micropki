@@ -214,3 +214,51 @@ curl -o test.crl http://127.0.0.1:8080/crl/intermediate.crl
 type test.crl
 # запуск тестов
 notepad tests\test_revocation.py
+
+
+# Sprint 5:
+# Посмотреть все сертификаты и их серийные номера
+micropki ca list-certs --format table
+
+# 1. Выпустить OCSP сертификат
+micropki ca issue-ocsp-cert --ca-cert pki/certs/intermediate.cert.pem --ca-key pki/private/intermediate.key.pem --ca-pass-file secrets/intermediate.pass --subject "CN=OCSP Responder" --key-type rsa --key-size 2048 --san dns:localhost --out-dir pki/certs --validity-days 365
+
+# 2. Запустить OCSP сервер
+micropki ocsp serve --host 127.0.0.1 --port 8081 --db-path ./pki/micropki.db --responder-cert pki/certs/OCSP_Responder.cert.pem --responder-key pki/certs/OCSP_Responder.key.pem --ca-cert pki/certs/intermediate.cert.pem
+
+# 3. Проверка статус отозванного сертификата (example.com)
+curl -X POST http://127.0.0.1:8081/ocsp -d "serial=BC9589B92B3B763"
+
+# 4.Проверка статуса валидного сертификата (OCSP Responder)
+curl -X POST http://127.0.0.1:8081/ocsp -d "serial=DC20DFE9143ED10AF7BF926D3CD0F4FF57A0E1"
+
+# 5.Проверка несуществующего сертификата
+curl -X POST http://127.0.0.1:8081/ocsp -d "serial=1111111111111111"
+
+# Sprint 6:
+# Создать Root CA (если нет)
+micropki ca init --subject "CN=Root CA" --key-type rsa --key-size 4096 --passphrase-file secrets/ca.pass --out-dir pki --validity-days 365 --force
+
+# Создать Intermediate CA (если нет)
+micropki ca issue-intermediate --root-cert pki/certs/ca.cert.pem --root-key pki/private/ca.key.pem --root-pass-file secrets/ca.pass --subject "CN=Intermediate CA" --key-type rsa --key-size 4096 --passphrase-file secrets/intermediate.pass --out-dir pki --validity-days 365 --pathlen 0
+
+# Запуск сервера
+micropki repo serve --host 127.0.0.1 --port 8080 --db-path pki/micropki.db --cert-dir pki/certs
+
+# Генерация CSR
+micropki client gen-csr --subject "CN=test.com" --san dns:test.com --out-key key.pem --out-csr csr.pem
+
+# Запрос сертификата
+micropki client request-cert --csr csr.pem --template server --ca-url http://localhost:8080 --out-cert cert.pem
+
+# Валидация
+micropki client validate --cert cert.pem --untrusted pki/certs/intermediate.cert.pem --trusted pki/certs/ca.cert.pem
+
+# Генерация CRL
+micropki ca gen-crl --ca intermediate --next-update 7 --out-dir pki
+
+# Проверка статуса
+micropki client check-status --cert cert.pem --ca-cert pki/certs/intermediate.cert.pem --crl pki/crl/intermediate.crl.pem
+
+# Отзыв
+micropki ca revoke <SERIAL> --reason keyCompromise --force

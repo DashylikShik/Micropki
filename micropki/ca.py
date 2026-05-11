@@ -790,3 +790,110 @@ class CertificateAuthority:
         except Exception as e:
             self.logger.error(f"Chain verification error: {str(e)}")
             return False, [str(e)]
+        # ============= SPRINT 5: OCSP CERTIFICATE =============
+    
+    def issue_ocsp_certificate(
+        self,
+        ca_cert_path: str,
+        ca_key_path: str,
+        ca_passphrase_file: str,
+        subject: str,
+        key_type: str,
+        key_size: int,
+        san_list: List[str],
+        out_dir: str,
+        validity_days: int = 365
+    ) -> None:
+        """Issue an OCSP responder certificate."""
+        self.logger.info(f"Starting OCSP responder certificate issuance")
+        
+        try:
+            from micropki.ocsp import OCSPResponder
+            from micropki import certificates
+            
+            output_dir = out_dir
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Load CA certificate
+            self.logger.info(f"Loading CA certificate: {ca_cert_path}")
+            with open(ca_cert_path, 'rb') as f:
+                ca_cert = certificates.load_certificate(f.read())
+            
+            # Load CA private key
+            self.logger.info(f"Loading CA private key: {ca_key_path}")
+            with open(ca_key_path, 'rb') as f:
+                ca_key_data = f.read()
+            
+            with open(ca_passphrase_file, 'rb') as f:
+                ca_passphrase = f.read().strip()
+            
+            ca_private_key = serialization.load_pem_private_key(
+                ca_key_data,
+                password=ca_passphrase,
+                backend=default_backend()
+            )
+            
+            # Validate key size
+            if key_type.lower() == 'rsa' and key_size < 2048:
+                self.logger.warning(f"OCSP key size {key_size} is weaker than recommended 2048")
+            elif key_type.lower() == 'ecc' and key_size < 256:
+                self.logger.warning(f"OCSP key size {key_size} is weaker than recommended 256")
+            
+            # Create OCSP certificate
+            cert, private_key = OCSPResponder.create_ocsp_certificate(
+                ca_cert=ca_cert,
+                ca_key=ca_private_key,
+                subject_dn=subject,
+                key_type=key_type,
+                key_size=key_size,
+                san_list=san_list,
+                validity_days=validity_days
+            )
+            
+            # Determine filename
+            filename = self._get_cert_filename(subject, [])
+            if filename == "cert":
+                filename = "ocsp_responder"
+            
+            # Save certificate
+            cert_path = os.path.join(output_dir, f"{filename}.cert.pem")
+            with open(cert_path, 'wb') as f:
+                f.write(certificates.certificate_to_pem(cert))
+            self.logger.info(f"OCSP certificate saved to {cert_path}")
+            
+            # Save private key (unencrypted for OCSP responder)
+            key_path = os.path.join(output_dir, f"{filename}.key.pem")
+            key_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            )
+            with open(key_path, 'wb') as f:
+                f.write(key_pem)
+            
+            try:
+                os.chmod(key_path, 0o600)
+            except (OSError, AttributeError):
+                self.logger.warning("Could not set file permissions (Windows system)")
+            
+            # Insert into database if configured
+            if self.db:
+                cert_pem_str = certificates.certificate_to_pem(cert).decode('utf-8')
+                self._insert_certificate_to_db(
+                    cert=cert,
+                    cert_pem=cert_pem_str,
+                    subject=subject,
+                    issuer=ca_cert.subject.rfc4514_string(),
+                    status='valid'
+                )
+            
+            self.logger.warning("OCSP private key stored unencrypted! Handle with care.")
+            self.logger.info(f"OCSP certificate issued: subject={subject}, key_type={key_type}")
+            
+            print(f"[OK] OCSP responder certificate issued successfully")
+            print(f"  Certificate: {cert_path}")
+            print(f"  Private key: {key_path} (UNENCRYPTED - handle with care)")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to issue OCSP certificate: {str(e)}")
+            raise

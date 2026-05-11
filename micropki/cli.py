@@ -2,6 +2,7 @@
 import argparse
 import sys
 import os
+import json
 
 from micropki.ca import CertificateAuthority
 
@@ -102,6 +103,35 @@ Examples:
 
   # Generate CRL (Sprint 4)
   micropki ca gen-crl --ca intermediate --next-update 7
+
+  # Issue OCSP responder certificate (Sprint 5)
+  micropki ca issue-ocsp-cert \\
+    --ca-cert ./pki/certs/intermediate.cert.pem \\
+    --ca-key ./pki/private/intermediate.key.pem \\
+    --ca-pass-file ./secrets/intermediate.pass \\
+    --subject "CN=OCSP Responder" \\
+    --san dns:ocsp.example.com
+
+  # Start OCSP responder (Sprint 5)
+  micropki ocsp serve \\
+    --responder-cert ./pki/certs/ocsp_responder.cert.pem \\
+    --responder-key ./pki/certs/ocsp_responder.key.pem \\
+    --ca-cert ./pki/certs/intermediate.cert.pem
+
+  # Generate CSR (Sprint 6)
+  micropki client gen-csr --subject "CN=app.example.com" --key-type rsa --key-size 2048 \\
+    --san dns:app.example.com --out-key ./app.key.pem --out-csr ./app.csr.pem
+
+  # Request certificate from CA (Sprint 6)
+  micropki client request-cert --csr ./app.csr.pem --template server \\
+    --ca-url http://localhost:8080 --out-cert ./app.cert.pem
+
+  # Validate certificate chain (Sprint 6)
+  micropki client validate --cert ./app.cert.pem \\
+    --untrusted ./pki/certs/intermediate.cert.pem --trusted ./pki/certs/ca.cert.pem
+
+  # Check revocation status (Sprint 6)
+  micropki client check-status --cert ./app.cert.pem --ca-cert ./pki/certs/intermediate.cert.pem
         """
     )
     
@@ -132,12 +162,71 @@ Examples:
     serve_parser.add_argument('--cert-dir', default='./pki/certs', help='Certificate directory (default: ./pki/certs)')
     serve_parser.add_argument('--log-file', help='Optional path to log file')
     
-    #  CA COMMANDS
+    # OCSP COMMANDS (SPRINT 5)
+    ocsp_parser = subparsers.add_parser('ocsp', help='OCSP responder operations')
+    ocsp_subparsers = ocsp_parser.add_subparsers(dest='ocsp_command', help='OCSP commands')
+    ocsp_subparsers.required = True
+    
+    # ocsp serve command
+    ocsp_serve_parser = ocsp_subparsers.add_parser('serve', help='Start OCSP responder server')
+    ocsp_serve_parser.add_argument('--host', default='127.0.0.1', help='Bind address (default: 127.0.0.1)')
+    ocsp_serve_parser.add_argument('--port', type=int, default=8081, help='TCP port (default: 8081)')
+    ocsp_serve_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path')
+    ocsp_serve_parser.add_argument('--responder-cert', required=True, help='OCSP responder certificate (PEM)')
+    ocsp_serve_parser.add_argument('--responder-key', required=True, help='OCSP responder private key (PEM, unencrypted)')
+    ocsp_serve_parser.add_argument('--ca-cert', required=True, help='Issuer CA certificate (PEM)')
+    ocsp_serve_parser.add_argument('--cache-ttl', type=int, default=60, help='Cache TTL in seconds (default: 60)')
+    ocsp_serve_parser.add_argument('--log-file', help='Optional path to log file')
+    
+    # CLIENT COMMANDS (SPRINT 6)
+    client_parser = subparsers.add_parser('client', help='Client operations')
+    client_subparsers = client_parser.add_subparsers(dest='client_command', help='Client commands')
+    client_subparsers.required = True
+    
+    # client gen-csr command
+    gen_csr_parser = client_subparsers.add_parser('gen-csr', help='Generate private key and CSR')
+    gen_csr_parser.add_argument('--subject', required=True, help='Distinguished Name')
+    gen_csr_parser.add_argument('--key-type', default='rsa', choices=['rsa', 'ecc'])
+    gen_csr_parser.add_argument('--key-size', type=int, default=2048, help='Key size (RSA: 2048/4096, ECC: 256/384)')
+    gen_csr_parser.add_argument('--san', action='append', default=[], help='SAN (dns:example.com)')
+    gen_csr_parser.add_argument('--out-key', default='./key.pem', help='Output private key file')
+    gen_csr_parser.add_argument('--out-csr', default='./request.csr.pem', help='Output CSR file')
+    gen_csr_parser.add_argument('--log-file', help='Optional log file')
+    
+    # client request-cert command
+    request_cert_parser = client_subparsers.add_parser('request-cert', help='Request certificate from CA')
+    request_cert_parser.add_argument('--csr', required=True, help='CSR file path')
+    request_cert_parser.add_argument('--template', required=True, choices=['server', 'client', 'code_signing'])
+    request_cert_parser.add_argument('--ca-url', default='http://localhost:8080', help='CA repository URL')
+    request_cert_parser.add_argument('--out-cert', default='./cert.pem', help='Output certificate file')
+    request_cert_parser.add_argument('--api-key', help='API key for authentication')
+    request_cert_parser.add_argument('--log-file', help='Optional log file')
+    
+    # client validate command
+    validate_parser = client_subparsers.add_parser('validate', help='Validate certificate chain')
+    validate_parser.add_argument('--cert', required=True, help='Leaf certificate file')
+    validate_parser.add_argument('--untrusted', action='append', default=[], help='Intermediate certificate file(s)')
+    validate_parser.add_argument('--trusted', action='append', default=[], help='Trusted root certificate file(s)')
+    validate_parser.add_argument('--crl', help='CRL file or URL for revocation check')
+    validate_parser.add_argument('--ocsp', action='store_true', help='Enable OCSP revocation check')
+    validate_parser.add_argument('--format', default='text', choices=['text', 'json'], help='Output format')
+    validate_parser.add_argument('--log-file', help='Optional log file')
+    
+    # client check-status command
+    check_status_parser = client_subparsers.add_parser('check-status', help='Check certificate revocation status')
+    check_status_parser.add_argument('--cert', required=True, help='Certificate file')
+    check_status_parser.add_argument('--ca-cert', required=True, help='Issuer CA certificate file')
+    check_status_parser.add_argument('--crl', help='CRL file or URL')
+    check_status_parser.add_argument('--ocsp-url', help='OCSP responder URL')
+    check_status_parser.add_argument('--format', default='text', choices=['text', 'json'], help='Output format')
+    check_status_parser.add_argument('--log-file', help='Optional log file')
+    
+    # CA COMMANDS
     ca_parser = subparsers.add_parser('ca', help='Certificate Authority operations')
     ca_subparsers = ca_parser.add_subparsers(dest='ca_command', help='CA commands')
     ca_subparsers.required = True
     
-    #  SPRINT 1 COMMANDS
+    # SPRINT 1 COMMANDS
     
     # ca init command
     init_parser = ca_subparsers.add_parser('init', help='Initialize a self-signed Root CA')
@@ -223,7 +312,8 @@ Examples:
         help='Optional path to log file'
     )
     
-    #  SPRINT 2 COMMANDS
+    # SPRINT 2 COMMANDS
+    
     # ca issue-intermediate command
     intermediate_parser = ca_subparsers.add_parser(
         'issue-intermediate',
@@ -274,7 +364,8 @@ Examples:
     chain_parser.add_argument('--root', required=True, help='Root certificate')
     chain_parser.add_argument('--log-file')
     
-    #  SPRINT 3 COMMANDS 
+    # SPRINT 3 COMMANDS
+    
     # ca list-certs command
     list_parser = ca_subparsers.add_parser('list-certs', help='List certificates in database')
     list_parser.add_argument('--status', choices=['valid', 'revoked', 'expired'], 
@@ -294,7 +385,7 @@ Examples:
                               help='Database file path (default: ./pki/micropki.db)')
     show_parser.add_argument('--log-file', help='Optional path to log file')
     
-    #  SPRINT 4 COMMANDS 
+    # SPRINT 4 COMMANDS
     
     # ca revoke command
     revoke_parser = ca_subparsers.add_parser('revoke', help='Revoke a certificate')
@@ -319,6 +410,31 @@ Examples:
     gen_crl_parser.add_argument('--db-path', default='./pki/micropki.db', help='Database file path')
     gen_crl_parser.add_argument('--log-file', help='Optional path to log file')
     
+    # SPRINT 5 COMMANDS
+    
+    # ca issue-ocsp-cert command
+    ocsp_cert_parser = ca_subparsers.add_parser(
+        'issue-ocsp-cert',
+        help='Issue an OCSP responder certificate'
+    )
+    ocsp_cert_parser.add_argument('--ca-cert', required=True, help='CA certificate (PEM)')
+    ocsp_cert_parser.add_argument('--ca-key', required=True, help='CA encrypted private key')
+    ocsp_cert_parser.add_argument('--ca-pass-file', required=True, help='CA passphrase file')
+    ocsp_cert_parser.add_argument('--subject', required=True, help='OCSP responder Distinguished Name')
+    ocsp_cert_parser.add_argument('--key-type', default='rsa', choices=['rsa', 'ecc'],
+                                   help='Key type (default: rsa)')
+    ocsp_cert_parser.add_argument('--key-size', type=int, default=2048,
+                                   help='Key size (RSA: 2048+, ECC: 256/384) (default: 2048)')
+    ocsp_cert_parser.add_argument('--san', action='append', default=[],
+                                   help='SAN (e.g., dns:ocsp.example.com)')
+    ocsp_cert_parser.add_argument('--out-dir', default='./pki/certs',
+                                   help='Output directory (default: ./pki/certs)')
+    ocsp_cert_parser.add_argument('--validity-days', type=int, default=365,
+                                   help='Validity period in days (default: 365)')
+    ocsp_cert_parser.add_argument('--log-file', help='Optional path to log file')
+    ocsp_cert_parser.add_argument('--db-path', default='./pki/micropki.db',
+                                   help='Database file path (default: ./pki/micropki.db)')
+    
     args = parser.parse_args()
     
     try:
@@ -331,7 +447,7 @@ Examples:
                 db.init_schema(force=args.force)
                 print(f"[OK] Database initialized successfully: {args.db_path}")
         
-        #SPRINT 3: REPOSITORY COMMANDS 
+        # SPRINT 3: REPOSITORY COMMANDS
         elif args.command == 'repo':
             from micropki.repository import RepositoryServer
             
@@ -352,13 +468,121 @@ Examples:
                 except KeyboardInterrupt:
                     print("\n[INFO] Server stopped")
         
-        # CA COMMANDS 
+        # SPRINT 5: OCSP COMMANDS
+        elif args.command == 'ocsp':
+            from micropki.ocsp_responder import OCSPResponderServer
+            
+            if args.ocsp_command == 'serve':
+                server = OCSPResponderServer(
+                    db_path=args.db_path,
+                    ca_cert_path=args.ca_cert,
+                    responder_cert_path=args.responder_cert,
+                    responder_key_path=args.responder_key,
+                    host=args.host,
+                    port=args.port,
+                    cache_ttl=args.cache_ttl,
+                    log_file=args.log_file
+                )
+                print(f"[INFO] Starting OCSP responder on {args.host}:{args.port}")
+                print(f"[INFO] Database: {args.db_path}")
+                print(f"[INFO] CA certificate: {args.ca_cert}")
+                print(f"[INFO] Responder certificate: {args.responder_cert}")
+                print("[INFO] Press Ctrl+C to stop")
+                try:
+                    server.start()
+                except KeyboardInterrupt:
+                    print("\n[INFO] OCSP server stopped")
+        
+        # SPRINT 6: CLIENT COMMANDS
+        elif args.command == 'client':
+            from micropki.client import Client
+            
+            client = Client(log_file=getattr(args, 'log_file', None))
+            
+            if args.client_command == 'gen-csr':
+                # Generate CSR
+                client.generate_csr(
+                    subject=args.subject,
+                    key_type=args.key_type,
+                    key_size=args.key_size,
+                    san_list=args.san,
+                    out_key=args.out_key,
+                    out_csr=args.out_csr
+                )
+                print(f"[OK] CSR generated successfully")
+                print(f"  Private key: {args.out_key} (UNENCRYPTED - handle with care)")
+                print(f"  CSR: {args.out_csr}")
+            
+            elif args.client_command == 'request-cert':
+                # Request certificate from CA
+                cert = client.request_certificate(
+                    csr_path=args.csr,
+                    template=args.template,
+                    ca_url=args.ca_url,
+                    out_cert=args.out_cert,
+                    api_key=args.api_key
+                )
+                print(f"[OK] Certificate issued successfully")
+                print(f"  Certificate: {args.out_cert}")
+                print(f"  Subject: {cert.subject.rfc4514_string()}")
+                print(f"  Serial: {hex(cert.serial_number)[2:].upper()}")
+            
+            elif args.client_command == 'validate':
+                # Validate certificate chain
+                result = client.validate_certificate(
+                    cert_path=args.cert,
+                    untrusted_paths=args.untrusted if args.untrusted else None,
+                    trusted_paths=args.trusted if args.trusted else None,
+                    crl_source=args.crl,
+                    ocsp_enabled=args.ocsp
+                )
+                
+                if args.format == 'json':
+                    print(json.dumps(result, indent=2))
+                else:
+                    print(f"\nCertificate Validation Result")
+                    print("=" * 50)
+                    print(f"Overall Status: {result['overall_status'].upper()}")
+                    print("\nValidation Steps:")
+                    for step in result['steps']:
+                        status_icon = "✅" if step['status'] == 'passed' else "❌"
+                        print(f"  {status_icon} {step['name']}: {step['status']}")
+                        if step.get('message'):
+                            print(f"      {step['message']}")
+                
+                if result['overall_status'] != 'passed':
+                    sys.exit(1)
+            
+            elif args.client_command == 'check-status':
+                # Check revocation status
+                result = client.check_revocation_status(
+                    cert_path=args.cert,
+                    issuer_path=args.ca_cert,
+                    crl_source=args.crl,
+                    ocsp_url=args.ocsp_url
+                )
+                
+                if args.format == 'json':
+                    print(json.dumps(result, indent=2))
+                else:
+                    print(f"\nRevocation Status Check")
+                    print("=" * 50)
+                    print(f"Certificate: {result['subject']}")
+                    print(f"Serial: {result['serial']}")
+                    print(f"Status: {result['status'].upper()}")
+                    print(f"Method: {result['method']}")
+                    if result.get('revocation_date'):
+                        print(f"Revocation Date: {result['revocation_date']}")
+                    if result.get('revocation_reason'):
+                        print(f"Revocation Reason: {result['revocation_reason']}")
+        
+        # CA COMMANDS
         elif args.command == 'ca':
             # Create CA instance with database support if db_path provided
             db_path = getattr(args, 'db_path', None)
             ca = CertificateAuthority(log_file=getattr(args, 'log_file', None), db_path=db_path)
             
-            #SPRINT 1 COMMANDS HANDLERS 
+            # SPRINT 1 COMMANDS HANDLERS
             
             if args.ca_command == 'init':
                 # Validate key arguments
@@ -520,13 +744,13 @@ Examples:
                         print(f"  - {err}", file=sys.stderr)
                     sys.exit(1)
             
-            #SPRINT 3 COMMANDS HANDLERS
+            # SPRINT 3 COMMANDS HANDLERS
             
             elif args.ca_command == 'list-certs':
                 from micropki.database import CertificateDatabase
                 
                 db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
-                db.update_expired_status()  # Update expired status before listing
+                db.update_expired_status()
                 
                 certs = db.list_certificates(status=args.status, limit=args.limit)
                 
@@ -550,8 +774,9 @@ Examples:
                         print(f"{cert['serial_hex']},{cert['subject']},{cert['issuer']},"
                               f"{cert['not_before']},{cert['not_after']},{cert['status']}")
                 
-                else:  # table format
+                else:
                     print(f"{'SERIAL':<20} {'SUBJECT':<35} {'STATUS':<10} {'EXPIRES':<20}")
+                    print("=" * 100)
                     for cert in certs:
                         serial = cert['serial_hex'][:18] + "..." if len(cert['serial_hex']) > 18 else cert['serial_hex']
                         subject = cert['subject'][:32] + "..." if len(cert['subject']) > 32 else cert['subject']
@@ -579,18 +804,15 @@ Examples:
                 
                 db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
                 
-                # Check if certificate exists
                 cert = db.get_certificate_by_serial(args.serial)
                 if not cert:
                     print(f"[ERROR] Certificate with serial {args.serial} not found", file=sys.stderr)
                     sys.exit(1)
                 
-                # Check if already revoked
                 if cert['status'] == 'revoked':
                     print(f"[WARNING] Certificate {args.serial} is already revoked", file=sys.stderr)
                     sys.exit(0)
                 
-                # Confirm revocation
                 if not args.force:
                     print(f"Certificate to revoke:")
                     print(f"  Serial: {cert['serial_hex']}")
@@ -603,7 +825,6 @@ Examples:
                         print("[CANCELLED] Revocation cancelled.")
                         sys.exit(0)
                 
-                # Revoke certificate
                 try:
                     reason_code = get_reason_code(args.reason)
                     success = db.revoke_certificate(args.serial, args.reason)
@@ -621,19 +842,17 @@ Examples:
                 from micropki.revocation import CRLGenerator
                 from micropki import certificates
                 
-                # Determine paths
                 if args.ca == 'root':
                     ca_cert_path = os.path.join(args.out_dir, 'certs', 'ca.cert.pem')
                     ca_key_path = os.path.join(args.out_dir, 'private', 'ca.key.pem')
                     ca_pass_file = os.path.join(os.path.dirname(args.out_dir), 'secrets', 'ca.pass')
                     default_out = os.path.join(args.out_dir, 'crl', 'root.crl.pem')
-                else:  # intermediate
+                else:
                     ca_cert_path = os.path.join(args.out_dir, 'certs', 'intermediate.cert.pem')
                     ca_key_path = os.path.join(args.out_dir, 'private', 'intermediate.key.pem')
                     ca_pass_file = os.path.join(os.path.dirname(args.out_dir), 'secrets', 'intermediate.pass')
                     default_out = os.path.join(args.out_dir, 'crl', 'intermediate.crl.pem')
                 
-                # Check files exist
                 if not os.path.exists(ca_cert_path):
                     print(f"[ERROR] CA certificate not found: {ca_cert_path}", file=sys.stderr)
                     sys.exit(1)
@@ -644,20 +863,16 @@ Examples:
                     print(f"[ERROR] CA passphrase file not found: {ca_pass_file}", file=sys.stderr)
                     sys.exit(1)
                 
-                # Create CRL directory
                 crl_dir = os.path.join(args.out_dir, 'crl')
                 os.makedirs(crl_dir, exist_ok=True)
                 
-                # Read passphrase
                 with open(ca_pass_file, 'rb') as f:
                     ca_passphrase = f.read().strip()
                 
-                # Load CA certificate to get subject
                 with open(ca_cert_path, 'rb') as f:
                     ca_cert = certificates.load_certificate(f.read())
                 ca_subject_dn = ca_cert.subject.rfc4514_string()
                 
-                # Initialize database and CRL generator
                 db = CertificateDatabase(args.db_path, getattr(args, 'log_file', None))
                 crl_gen = CRLGenerator(
                     db=db,
@@ -667,10 +882,8 @@ Examples:
                     log_file=getattr(args, 'log_file', None)
                 )
                 
-                # Determine output file
                 out_file = args.out_file if args.out_file else default_out
                 
-                # Generate CRL
                 crl_gen.generate_crl(
                     ca_subject=ca_subject_dn,
                     next_update_days=args.next_update,
@@ -680,6 +893,32 @@ Examples:
                 print(f"[OK] CRL generated for {args.ca} CA")
                 print(f"  File: {out_file}")
                 print(f"  Next update: {args.next_update} days")
+            
+            # SPRINT 5 COMMANDS HANDLERS
+            
+            elif args.ca_command == 'issue-ocsp-cert':
+                # Validate key size for OCSP
+                if args.key_type == 'rsa' and args.key_size < 2048:
+                    print(f"[WARNING] RSA key size {args.key_size} is less than recommended 2048", file=sys.stderr)
+                
+                # Check files exist
+                for f in [args.ca_cert, args.ca_key, args.ca_pass_file]:
+                    if not os.path.exists(f):
+                        print(f"[ERROR] File not found: {f}", file=sys.stderr)
+                        sys.exit(1)
+                
+                # Issue OCSP certificate
+                ca.issue_ocsp_certificate(
+                    ca_cert_path=args.ca_cert,
+                    ca_key_path=args.ca_key,
+                    ca_passphrase_file=args.ca_pass_file,
+                    subject=args.subject,
+                    key_type=args.key_type,
+                    key_size=args.key_size,
+                    san_list=args.san,
+                    out_dir=args.out_dir,
+                    validity_days=args.validity_days
+                )
     
     except Exception as e:
         print(f"[ERROR] {str(e)}", file=sys.stderr)
