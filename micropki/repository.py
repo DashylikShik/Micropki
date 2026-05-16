@@ -7,6 +7,7 @@ from datetime import datetime
 
 from micropki import logger
 from micropki.database import CertificateDatabase
+from micropki.ratelimit import create_rate_limiter
 
 
 class RepositoryServer:
@@ -18,7 +19,9 @@ class RepositoryServer:
         cert_dir: str,
         host: str = '127.0.0.1',
         port: int = 8080,
-        log_file: Optional[str] = None
+        log_file: Optional[str] = None,
+        rate_limit: int = 0,
+        rate_burst: int = 10
     ):
         """
         Initialize repository server.
@@ -29,14 +32,30 @@ class RepositoryServer:
             host: Bind address
             port: TCP port
             log_file: Optional log file
+            rate_limit: Requests per second per client (0 = disabled)
+            rate_burst: Burst allowance
         """
         self.db_path = db_path
         self.cert_dir = cert_dir
         self.host = host
         self.port = port
         self.logger = logger.setup_logger(log_file)
+        self.rate_limiter = create_rate_limiter(rate_limit, rate_burst) if rate_limit > 0 else None
         self.app = Flask('micropki-repo')
         self._setup_routes()
+    
+    def _check_rate_limit(self, client_ip: str):
+        """Check rate limit for client."""
+        if self.rate_limiter:
+            allowed, retry_after = self.rate_limiter.allow(client_ip)
+            if not allowed:
+                return Response(
+                    f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                    status=429,
+                    headers={'Retry-After': str(retry_after)},
+                    mimetype='text/plain'
+                )
+        return None
     
     def _setup_routes(self) -> None:
         """Setup Flask routes."""
@@ -45,6 +64,12 @@ class RepositoryServer:
         def get_certificate(serial: str):
             """GET /certificate/<serial> - return certificate PEM."""
             self._log_request()
+            
+            # Rate limiting check
+            client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
             
             # Validate hex format
             try:
@@ -79,6 +104,12 @@ class RepositoryServer:
             """GET /ca/root or /ca/intermediate - return CA certificate."""
             self._log_request()
             
+            # Rate limiting check
+            client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
+            
             if level == 'root':
                 cert_path = os.path.join(self.cert_dir, 'ca.cert.pem')
             elif level == 'intermediate':
@@ -109,6 +140,12 @@ class RepositoryServer:
         def get_crl():
             """GET /crl - return CRL (default intermediate, or specify ?ca=root)."""
             self._log_request()
+            
+            # Rate limiting check
+            client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
             
             ca_level = request.args.get('ca', 'intermediate')
             
@@ -149,6 +186,12 @@ class RepositoryServer:
             """GET /crl/root.crl or /crl/intermediate.crl - return CRL file."""
             self._log_request()
             
+            # Rate limiting check
+            client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
+            
             if ca not in ['root', 'intermediate']:
                 return Response("Invalid CA. Use 'root' or 'intermediate'", status=400)
             
@@ -169,6 +212,12 @@ class RepositoryServer:
         def request_cert():
             """POST /request-cert - submit CSR and receive signed certificate."""
             client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            
+            # Rate limiting check
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
+            
             template = request.args.get('template', 'server')
             
             self.logger.info(f"[HTTP] Certificate request from {client_ip}, template={template}")
@@ -183,7 +232,6 @@ class RepositoryServer:
                 from cryptography import x509
                 from cryptography.hazmat.backends import default_backend
                 from cryptography.hazmat.primitives import serialization, hashes
-                from cryptography.hazmat.primitives.asymmetric import rsa, ec
                 
                 # Try to load as PEM first
                 try:
@@ -229,7 +277,7 @@ class RepositoryServer:
                 if template == 'server' and not san_list:
                     return Response("Bad Request: Server certificate requires at least one SAN", status=400)
                 
-                # Load CA certificate and key - используем правильные пути
+                # Load CA certificate and key
                 ca_cert_path = os.path.join(self.cert_dir, 'intermediate.cert.pem')
                 if not os.path.exists(ca_cert_path):
                     ca_cert_path = os.path.join(self.cert_dir, 'ca.cert.pem')
@@ -421,6 +469,11 @@ class RepositoryServer:
         @self.app.route('/health', methods=['GET'])
         def health():
             """GET /health - health check endpoint."""
+            # Rate limiting check
+            client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+            rate_limit_response = self._check_rate_limit(client_ip)
+            if rate_limit_response:
+                return rate_limit_response
             return Response("OK", status=200, mimetype='text/plain')
         
         @self.app.errorhandler(404)

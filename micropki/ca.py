@@ -11,6 +11,8 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import ExtensionOID
 
 from micropki import crypto_utils, certificates, logger
+from micropki.policy import get_policy_enforcer, TemplateType
+from micropki.audit import audit_log
 
 
 class CertificateAuthority:
@@ -169,9 +171,13 @@ class CertificateAuthority:
             # Create policy document
             self._create_policy_document(out_dir, subject, key_type, key_size, validity_days)
             
+            # Audit log
+            audit_log("ca_init", "success", f"Root CA initialized: {subject}", {"subject": subject})
+            
             self.logger.info("Root CA initialization completed successfully")
             
         except Exception as e:
+            audit_log("ca_init", "failure", str(e), {"subject": subject})
             self.logger.error(f"Failed to initialize Root CA: {str(e)}")
             raise
     
@@ -189,12 +195,10 @@ class CertificateAuthority:
         
         with open(policy_path, 'w', encoding='utf-8') as f:
             f.write("MICROPKI CERTIFICATE POLICY DOCUMENT\n")
-            f.write("=" * 50 + "\n\n")
             f.write(f"Policy Version: 1.0\n")
             f.write(f"Creation Date: {self.certificate.not_valid_before_utc.isoformat()}\n\n")
             
             f.write("CERTIFICATE AUTHORITY INFORMATION\n")
-            f.write("-" * 30 + "\n")
             f.write(f"CA Name (Subject DN): {subject}\n")
             f.write(f"Certificate Serial Number: 0x{self.certificate.serial_number:X}\n")
             f.write(f"Valid From: {self.certificate.not_valid_before_utc.isoformat()}\n")
@@ -202,7 +206,6 @@ class CertificateAuthority:
             f.write(f"Validity Period: {validity_days} days\n\n")
             
             f.write("CRYPTOGRAPHIC PARAMETERS\n")
-            f.write("-" * 30 + "\n")
             f.write(f"Key Algorithm: {key_type.upper()}\n")
             f.write(f"Key Size: {key_size} bits\n")
             if key_type.lower() == 'rsa':
@@ -212,13 +215,11 @@ class CertificateAuthority:
             f.write(f"Certificate Version: X.509 v3\n\n")
             
             f.write("CERTIFICATE PURPOSE\n")
-            f.write("-" * 30 + "\n")
             f.write("Root CA for MicroPKI demonstration and testing.\n")
             f.write("This CA is intended for educational and development\n")
             f.write("purposes only. Not for production use.\n\n")
             
             f.write("CERTIFICATE EXTENSIONS\n")
-            f.write("-" * 30 + "\n")
             f.write("Basic Constraints: CA=TRUE (Critical)\n")
             f.write("Key Usage: keyCertSign, cRLSign (Critical)\n")
             f.write("Subject Key Identifier: Present\n")
@@ -289,7 +290,7 @@ class CertificateAuthority:
             self.logger.error(f"Key-certificate verification error: {str(e)}")
             return False
     
-    # ============= SPRINT 2: INTERMEDIATE CA METHODS =============
+    #  SPRINT 2: INTERMEDIATE CA METHODS 
     
     def issue_intermediate_ca(
         self,
@@ -343,6 +344,29 @@ class CertificateAuthority:
                 intermediate_private_key = crypto_utils.generate_rsa_key(key_size)
             else:
                 intermediate_private_key = crypto_utils.generate_ecc_key(key_size)
+            
+            #  SPRINT 7: POLICY ENFORCEMENT FOR INTERMEDIATE CA 
+            policy = get_policy_enforcer()
+            if policy:
+                valid, msg = policy.check_key_size(intermediate_private_key, is_ca=True, is_root=False)
+                if not valid:
+                    audit_log(
+                        operation="issue_intermediate_ca",
+                        status="failure",
+                        message=f"Policy violation: {msg}",
+                        metadata={"subject": subject}
+                    )
+                    raise ValueError(f"Policy violation: {msg}")
+                
+                valid, msg = policy.check_validity_period(validity_days, is_ca=True, is_root=False)
+                if not valid:
+                    audit_log(
+                        operation="issue_intermediate_ca",
+                        status="failure",
+                        message=f"Policy violation: {msg}",
+                        metadata={"subject": subject}
+                    )
+                    raise ValueError(f"Policy violation: {msg}")
             
             # Read Intermediate CA passphrase
             with open(intermediate_passphrase_file, 'rb') as f:
@@ -412,9 +436,13 @@ class CertificateAuthority:
             self._update_policy_with_intermediate(out_dir, subject, key_type, key_size, 
                                                    validity_days, pathlen, root_cert.subject)
             
+            # Audit log
+            audit_log("issue_intermediate", "success", f"Intermediate CA issued: {subject}", {"subject": subject})
+            
             self.logger.info("Intermediate CA issuance completed successfully")
             
         except Exception as e:
+            audit_log("issue_intermediate", "failure", str(e), {"subject": subject})
             self.logger.error(f"Failed to issue Intermediate CA: {str(e)}")
             raise
     
@@ -430,14 +458,13 @@ class CertificateAuthority:
         validity_days: int = 365,
         csr_path: OptionalType[str] = None
     ) -> None:
-        """Issue an end-entity certificate."""
+        """Issue an end-entity certificate with policy enforcement."""
         self.logger.info(f"Starting certificate issuance (template: {template_name})")
         
         try:
             from micropki import san as san_module
             from micropki import templates
             
-            # Используем out_dir как конечную директорию (НЕ добавляем подпапку)
             output_dir = out_dir
             os.makedirs(output_dir, exist_ok=True)
             
@@ -496,6 +523,36 @@ class CertificateAuthority:
                 )
                 end_entity_public_key = end_entity_private_key.public_key()
                 parsed_subject = subject
+            
+            #SPRINT 7: POLICY ENFORCEMENT
+            policy = get_policy_enforcer()
+            if policy:
+                # Determine template type for policy
+                if template_name == 'server':
+                    tmpl = TemplateType.SERVER
+                elif template_name == 'client':
+                    tmpl = TemplateType.CLIENT
+                else:
+                    tmpl = TemplateType.CODE_SIGNING
+                
+                valid, msg = policy.enforce_issuance_policy(
+                    public_key=end_entity_public_key,
+                    validity_days=validity_days,
+                    template=tmpl,
+                    san_list=parsed_sans,
+                    is_ca=False
+                )
+                
+                if not valid:
+                    # Log policy violation to audit
+                    audit_log(
+                        operation="issue_certificate",
+                        status="failure",
+                        message=f"Policy violation: {msg}",
+                        metadata={"subject": subject, "template": template_name}
+                    )
+                    raise ValueError(f"Policy violation: {msg}")
+            #  END SPRINT 7
             
             # Create certificate extensions from template
             extensions = template.get_extensions(parsed_sans)
@@ -565,11 +622,25 @@ class CertificateAuthority:
                     status='valid'
                 )
             
+            # Audit log success
+            audit_log(
+                operation="issue_certificate",
+                status="success",
+                message=f"Certificate issued: {parsed_subject}",
+                metadata={"serial": hex(serial_number), "template": template_name}
+            )
+            
             self.logger.info(f"Certificate issued: serial={hex(serial_number)}, "
                            f"subject={parsed_subject}, template={template_name}, "
                            f"sans={san_list}")
             
         except Exception as e:
+            audit_log(
+                operation="issue_certificate",
+                status="failure",
+                message=str(e),
+                metadata={"subject": subject, "template": template_name}
+            )
             self.logger.error(f"Failed to issue certificate: {str(e)}")
             raise
     
@@ -790,7 +861,8 @@ class CertificateAuthority:
         except Exception as e:
             self.logger.error(f"Chain verification error: {str(e)}")
             return False, [str(e)]
-        # ============= SPRINT 5: OCSP CERTIFICATE =============
+    
+    #  SPRINT 5: OCSP CERTIFICATE
     
     def issue_ocsp_certificate(
         self,
@@ -887,6 +959,9 @@ class CertificateAuthority:
                     status='valid'
                 )
             
+            # Audit log
+            audit_log("issue_ocsp_cert", "success", f"OCSP certificate issued: {subject}", {})
+            
             self.logger.warning("OCSP private key stored unencrypted! Handle with care.")
             self.logger.info(f"OCSP certificate issued: subject={subject}, key_type={key_type}")
             
@@ -895,5 +970,80 @@ class CertificateAuthority:
             print(f"  Private key: {key_path} (UNENCRYPTED - handle with care)")
             
         except Exception as e:
+            audit_log("issue_ocsp_cert", "failure", str(e), {})
             self.logger.error(f"Failed to issue OCSP certificate: {str(e)}")
             raise
+    
+    #  SPRINT 7: REVOCATION WITH AUDIT
+    
+    def revoke_certificate_with_audit(
+        self,
+        serial_hex: str,
+        reason: str,
+        is_compromise: bool = False
+    ) -> bool:
+        """
+        Revoke a certificate and log to audit.
+        
+        Args:
+            serial_hex: Serial number in hex
+            reason: Revocation reason
+            is_compromise: Whether this is a compromise simulation
+            
+        Returns:
+            True if revoked successfully
+        """
+        if not self.db:
+            self.logger.error("Database not configured for revocation")
+            return False
+        
+        # Get certificate info for audit
+        cert = self.db.get_certificate_by_serial(serial_hex)
+        if not cert:
+            self.logger.error(f"Certificate not found: {serial_hex}")
+            return False
+        
+        # Revoke
+        success = self.db.revoke_certificate(serial_hex, reason)
+        
+        if success:
+            operation = "key_compromise" if is_compromise else "revoke_certificate"
+            audit_log(
+                operation=operation,
+                status="success",
+                message=f"Certificate {serial_hex} revoked: {reason}",
+                metadata={
+                    "serial": serial_hex,
+                    "subject": cert['subject'],
+                    "reason": reason
+                }
+            )
+            
+            # Generate emergency CRL for compromise
+            if is_compromise:
+                self._generate_emergency_crl()
+        
+        return success
+    
+    def _generate_emergency_crl(self) -> None:
+        """Generate emergency CRL after compromise."""
+        try:
+            from micropki.revocation import CRLGenerator
+            
+            ca_cert_path = os.path.join('./pki/certs', 'intermediate.cert.pem')
+            ca_key_path = os.path.join('./pki/private', 'intermediate.key.pem')
+            ca_pass_file = os.path.join('./secrets', 'intermediate.pass')
+            
+            if os.path.exists(ca_cert_path) and os.path.exists(ca_key_path) and os.path.exists(ca_pass_file):
+                with open(ca_pass_file, 'rb') as f:
+                    ca_passphrase = f.read().strip()
+                
+                crl_gen = CRLGenerator(self.db, ca_cert_path, ca_key_path, ca_passphrase)
+                crl_gen.generate_crl(
+                    ca_subject="CN=Intermediate CA",
+                    next_update_days=7,
+                    out_file=os.path.join('./pki/crl', 'intermediate.crl.pem')
+                )
+                self.logger.info("Emergency CRL generated after compromise")
+        except Exception as e:
+            self.logger.error(f"Failed to generate emergency CRL: {str(e)}")
