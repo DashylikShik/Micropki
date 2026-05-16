@@ -262,3 +262,33 @@ micropki client check-status --cert cert.pem --ca-cert pki/certs/intermediate.ce
 
 # Отзыв
 micropki ca revoke <SERIAL> --reason keyCompromise --force
+
+
+# Sprint 7:
+cd C:\Users\Пользователь\Desktop\project_root
+venv\Scripts\activate
+
+# Установить pytest если не установлен
+pip install pytest
+
+# Запустить тесты для 7 спринта
+pytest tests/test_sprint7_audit.py tests/test_sprint7_policy.py tests/test_sprint7_ratelimit.py tests/test_sprint7_compromise.py tests/test_sprint7_integration.py -v
+
+# Ручное тестирование:
+# 1. Проверить audit query
+micropki audit query --operation issue --format table
+
+# 2. Проверить audit verify
+micropki audit verify
+
+# 3. Проверить rate limiting
+micropki repo serve --host 127.0.0.1 --port 8080 --rate-limit 2 --rate-burst 3
+
+# В другом окне выполнить:
+for /l %i in (1,1,5) do curl http://127.0.0.1:8080/health
+
+# 4. Проверить compromise
+micropki ca compromise --cert pki/certs/example.com.cert.pem --reason keyCompromise
+
+# 5. Проверить list-certs (статус revoked)
+micropki ca list-certs --format table
