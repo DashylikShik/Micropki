@@ -4,6 +4,7 @@ import urllib.request
 import urllib.parse
 from typing import Optional, Tuple, Dict, Any
 from enum import Enum
+from datetime import datetime, timezone
 
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization, hashes
@@ -184,6 +185,15 @@ class RevocationChecker:
         
         self.logger.info("Certificate not found in CRL - status: GOOD")
         return RevocationStatus.GOOD, None, None
+
+    def check_crl_freshness(self, crl: x509.CertificateRevocationList) -> Tuple[bool, str]:
+        """Check if CRL is fresh (REV-1)."""
+        now = datetime.now(timezone.utc)
+        next_update = crl.next_update
+        
+        if next_update < now:
+            return False, f"CRL expired. Next update was {next_update}"
+        return True, f"CRL valid until {next_update}"
     
     def check_ocsp(
         self,

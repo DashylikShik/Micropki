@@ -1,11 +1,12 @@
 """Certificate Authority operations for MicroPKI."""
 import os
 import datetime
+import hashlib
 from typing import List, Tuple, Optional as OptionalType
 
 from cryptography import x509
 from cryptography.hazmat.primitives.asymmetric.types import PrivateKeyTypes, PublicKeyTypes
-from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, ec
 from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import ExtensionOID
@@ -13,6 +14,7 @@ from cryptography.x509.oid import ExtensionOID
 from micropki import crypto_utils, certificates, logger
 from micropki.policy import get_policy_enforcer, TemplateType
 from micropki.audit import audit_log
+from cryptography.hazmat.primitives import hashes
 
 
 class CertificateAuthority:
@@ -199,6 +201,7 @@ class CertificateAuthority:
             f.write(f"Creation Date: {self.certificate.not_valid_before_utc.isoformat()}\n\n")
             
             f.write("CERTIFICATE AUTHORITY INFORMATION\n")
+  
             f.write(f"CA Name (Subject DN): {subject}\n")
             f.write(f"Certificate Serial Number: 0x{self.certificate.serial_number:X}\n")
             f.write(f"Valid From: {self.certificate.not_valid_before_utc.isoformat()}\n")
@@ -206,6 +209,7 @@ class CertificateAuthority:
             f.write(f"Validity Period: {validity_days} days\n\n")
             
             f.write("CRYPTOGRAPHIC PARAMETERS\n")
+  
             f.write(f"Key Algorithm: {key_type.upper()}\n")
             f.write(f"Key Size: {key_size} bits\n")
             if key_type.lower() == 'rsa':
@@ -215,11 +219,13 @@ class CertificateAuthority:
             f.write(f"Certificate Version: X.509 v3\n\n")
             
             f.write("CERTIFICATE PURPOSE\n")
+  
             f.write("Root CA for MicroPKI demonstration and testing.\n")
             f.write("This CA is intended for educational and development\n")
             f.write("purposes only. Not for production use.\n\n")
             
             f.write("CERTIFICATE EXTENSIONS\n")
+  
             f.write("Basic Constraints: CA=TRUE (Critical)\n")
             f.write("Key Usage: keyCertSign, cRLSign (Critical)\n")
             f.write("Subject Key Identifier: Present\n")
@@ -290,7 +296,7 @@ class CertificateAuthority:
             self.logger.error(f"Key-certificate verification error: {str(e)}")
             return False
     
-    #  SPRINT 2: INTERMEDIATE CA METHODS 
+    #   SPRINT 2: INTERMEDIATE CA METHODS  
     
     def issue_intermediate_ca(
         self,
@@ -345,7 +351,7 @@ class CertificateAuthority:
             else:
                 intermediate_private_key = crypto_utils.generate_ecc_key(key_size)
             
-            #  SPRINT 7: POLICY ENFORCEMENT FOR INTERMEDIATE CA 
+            #   SPRINT 7: POLICY ENFORCEMENT FOR INTERMEDIATE CA  
             policy = get_policy_enforcer()
             if policy:
                 valid, msg = policy.check_key_size(intermediate_private_key, is_ca=True, is_root=False)
@@ -367,6 +373,7 @@ class CertificateAuthority:
                         metadata={"subject": subject}
                     )
                     raise ValueError(f"Policy violation: {msg}")
+            #   END SPRINT 7  
             
             # Read Intermediate CA passphrase
             with open(intermediate_passphrase_file, 'rb') as f:
@@ -508,6 +515,14 @@ class CertificateAuthority:
                     csr_pem = f.read()
                 csr = csr_module.load_csr(csr_pem)
                 
+                #  SPRINT 6: Check CSR signature algorithm (POL-6)  
+                if csr.signature_hash_algorithm:
+                    algo_name = csr.signature_hash_algorithm.name
+                    if algo_name == 'sha1':
+                        raise ValueError("SHA-1 signature algorithm is forbidden. Use SHA-256 or stronger.")
+                    self.logger.info(f"CSR signature algorithm: {algo_name}")
+                #  END SPRINT 6 
+                
                 if not csr_module.verify_csr_signature(csr):
                     raise ValueError("CSR signature verification failed")
                 
@@ -524,7 +539,7 @@ class CertificateAuthority:
                 end_entity_public_key = end_entity_private_key.public_key()
                 parsed_subject = subject
             
-            #SPRINT 7: POLICY ENFORCEMENT
+            #  SPRINT 7: POLICY ENFORCEMENT 
             policy = get_policy_enforcer()
             if policy:
                 # Determine template type for policy
@@ -552,7 +567,25 @@ class CertificateAuthority:
                         metadata={"subject": subject, "template": template_name}
                     )
                     raise ValueError(f"Policy violation: {msg}")
-            #  END SPRINT 7
+            #  END SPRINT 7 
+            
+            #  SPRINT 7: Check if public key is compromised (CTL-4) 
+            if self.db:
+                public_key_der = end_entity_public_key.public_bytes(
+                    encoding=serialization.Encoding.DER,
+                    format=serialization.PublicFormat.SubjectPublicKeyInfo
+                )
+                public_key_hash = hashlib.sha256(public_key_der).hexdigest()
+                
+                if self.db.is_key_compromised(public_key_hash):
+                    audit_log(
+                        operation="issue_certificate",
+                        status="failure",
+                        message="Public key is marked as compromised",
+                        metadata={"subject": subject, "template": template_name}
+                    )
+                    raise ValueError("Public key is marked as compromised. Cannot issue new certificate.")
+            #  END SPRINT 7 
             
             # Create certificate extensions from template
             extensions = template.get_extensions(parsed_sans)
@@ -621,6 +654,11 @@ class CertificateAuthority:
                     issuer=ca_cert.subject.rfc4514_string(),
                     status='valid'
                 )
+            
+            #  SPRINT 7: Add to CT log (CTL-2)
+            from micropki.transparency import ct_add_entry
+            ct_add_entry(hex(serial_number)[2:].upper(), parsed_subject, cert_pem_str)
+            #  END SPRINT 7 
             
             # Audit log success
             audit_log(
@@ -795,9 +833,7 @@ class CertificateAuthority:
         policy_path = os.path.join(out_dir, 'policy.txt')
         
         with open(policy_path, 'a', encoding='utf-8') as f:
-            f.write("\n\n" + "=" * 50 + "\n")
             f.write("INTERMEDIATE CERTIFICATE AUTHORITY\n")
-            f.write("=" * 50 + "\n\n")
             f.write(f"CA Name (Subject DN): {subject}\n")
             f.write(f"Issuer (Root CA): {issuer_subject.rfc4514_string()}\n")
             f.write(f"Path Length Constraint: {pathlen}\n")
@@ -959,6 +995,10 @@ class CertificateAuthority:
                     status='valid'
                 )
             
+            #  SPRINT 7: Add to CT log
+            from micropki.transparency import ct_add_entry
+            ct_add_entry(hex(cert.serial_number)[2:].upper(), subject, cert_pem_str)
+            
             # Audit log
             audit_log("issue_ocsp_cert", "success", f"OCSP certificate issued: {subject}", {})
             
@@ -974,7 +1014,7 @@ class CertificateAuthority:
             self.logger.error(f"Failed to issue OCSP certificate: {str(e)}")
             raise
     
-    #  SPRINT 7: REVOCATION WITH AUDIT
+    # SPRINT 7: REVOCATION WITH AUDIT
     
     def revoke_certificate_with_audit(
         self,

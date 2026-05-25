@@ -3,6 +3,7 @@ import argparse
 import sys
 import os
 import json
+import hashlib
 
 from micropki.ca import CertificateAuthority
 from micropki.audit import init_audit_logger, get_audit_logger
@@ -141,6 +142,9 @@ Examples:
   # Audit verify (Sprint 7)
   micropki audit verify
 
+  # CT verify (Sprint 7)
+  micropki audit ct-verify --cert ./pki/certs/example.com.cert.pem
+
   # Compromise simulation (Sprint 7)
   micropki ca compromise --cert ./pki/certs/example.com.cert.pem --reason keyCompromise
         """
@@ -149,7 +153,7 @@ Examples:
     subparsers = parser.add_subparsers(dest='command', help='Commands')
     subparsers.required = True
     
-    # ============= SPRINT 7: AUDIT COMMANDS =============
+    #    SPRINT 7: AUDIT COMMANDS   
     audit_parser = subparsers.add_parser('audit', help='Audit log operations')
     audit_subparsers = audit_parser.add_subparsers(dest='audit_command', help='Audit commands')
     audit_subparsers.required = True
@@ -170,6 +174,12 @@ Examples:
     verify_parser = audit_subparsers.add_parser('verify', help='Verify audit log integrity')
     verify_parser.add_argument('--log-file', default='./pki/audit/audit.log', help='Audit log file path')
     verify_parser.add_argument('--chain-file', default='./pki/audit/chain.dat', help='Chain file path')
+    
+    #    SPRINT 7: CT VERIFY COMMAND (CTL-2)  
+    ct_verify_parser = audit_subparsers.add_parser('ct-verify', help='Verify certificate in CT log')
+    ct_verify_parser.add_argument('--cert', required=True, help='Certificate file path')
+    ct_verify_parser.add_argument('--out-dir', default='./pki', help='Output directory')
+    ct_verify_parser.add_argument('--log-file', help='Optional path to log file')
     
     # DATABASE COMMANDS (SPRINT 3)
     db_parser = subparsers.add_parser('db', help='Database operations')
@@ -213,9 +223,6 @@ Examples:
     ocsp_serve_parser.add_argument('--ca-cert', required=True, help='Issuer CA certificate (PEM)')
     ocsp_serve_parser.add_argument('--cache-ttl', type=int, default=60, help='Cache TTL in seconds (default: 60)')
     ocsp_serve_parser.add_argument('--log-file', help='Optional path to log file')
-    # Sprint 7: rate limiting for OCSP
-    ocsp_serve_parser.add_argument('--rate-limit', type=int, default=0, help='Requests per second per client (0 = disabled)')
-    ocsp_serve_parser.add_argument('--rate-burst', type=int, default=10, help='Burst allowance (default: 10)')
     
     # CLIENT COMMANDS (SPRINT 6)
     client_parser = subparsers.add_parser('client', help='Client operations')
@@ -399,6 +406,8 @@ Examples:
         # SPRINT 7: AUDIT COMMANDS
         if args.command == 'audit':
             from micropki.audit import AuditLogger
+            from micropki.transparency import CTLog
+            from micropki.certificates import load_certificate
             
             if args.audit_command == 'verify':
                 audit = AuditLogger(args.log_file, args.chain_file)
@@ -450,7 +459,6 @@ Examples:
                         print(f"{e.get('timestamp','')},{e.get('level','')},{e.get('operation','')},{e.get('status','')},{e.get('message','')}")
                 else:
                     print(f"{'TIMESTAMP':<30} {'LEVEL':<8} {'OPERATION':<20} {'STATUS':<10}")
-                    print("-" * 80)
                     for e in entries[:100]:
                         ts = e.get('timestamp', '')[:19]
                         level = e.get('level', '')[:8]
@@ -466,6 +474,22 @@ Examples:
                     else:
                         print("\n[FAILED] Integrity check failed")
                         sys.exit(1)
+            
+            #   = SPRINT 7: CT VERIFY (CTL-2)   =
+            elif args.audit_command == 'ct-verify':
+                with open(args.cert, 'rb') as f:
+                    cert = load_certificate(f.read())
+                serial_hex = hex(cert.serial_number)[2:].upper()
+                
+                audit_dir = os.path.join(args.out_dir, 'audit')
+                log_path = os.path.join(audit_dir, 'ct.log')
+                ct_log = CTLog(log_path)
+                
+                if ct_log.verify_entry(serial_hex):
+                    print(f"[OK] Certificate {serial_hex} found in CT log")
+                else:
+                    print(f"[NOT FOUND] Certificate {serial_hex} not found in CT log")
+                    sys.exit(1)
         
         # SPRINT 3: DB COMMANDS
         elif args.command == 'db':
@@ -504,6 +528,7 @@ Examples:
             from micropki.ocsp_responder import OCSPResponderServer
             
             if args.ocsp_command == 'serve':
+                # Собираем только те аргументы, которые есть
                 server = OCSPResponderServer(
                     db_path=args.db_path,
                     ca_cert_path=args.ca_cert,
@@ -512,13 +537,12 @@ Examples:
                     host=args.host,
                     port=args.port,
                     cache_ttl=args.cache_ttl,
-                    log_file=args.log_file,
-                    rate_limit=args.rate_limit,
-                    rate_burst=args.rate_burst
+                    log_file=args.log_file
                 )
                 print(f"[INFO] Starting OCSP responder on {args.host}:{args.port}")
-                if args.rate_limit > 0:
-                    print(f"[INFO] Rate limiting: {args.rate_limit} req/s (burst: {args.rate_burst})")
+                print(f"[INFO] Database: {args.db_path}")
+                print(f"[INFO] CA certificate: {args.ca_cert}")
+                print(f"[INFO] Responder certificate: {args.responder_cert}")
                 print("[INFO] Press Ctrl+C to stop")
                 try:
                     server.start()
@@ -545,7 +569,7 @@ Examples:
                     csr_path=args.csr, template=args.template, ca_url=args.ca_url,
                     out_cert=args.out_cert, api_key=args.api_key
                 )
-                print(f"[OK] Certificate issued successfully")
+                print(f" Certificate issued successfully")
                 print(f"  Certificate: {args.out_cert}")
                 print(f"  Subject: {cert.subject.rfc4514_string()}")
                 print(f"  Serial: {hex(cert.serial_number)[2:].upper()}")
@@ -561,11 +585,10 @@ Examples:
                     print(json.dumps(result, indent=2))
                 else:
                     print(f"\nCertificate Validation Result")
-                    print("=" * 50)
                     print(f"Overall Status: {result['overall_status'].upper()}")
                     print("\nValidation Steps:")
                     for step in result['steps']:
-                        status_icon = "✅" if step['status'] == 'passed' else "❌"
+                        status_icon = "" if step['status'] == 'passed' else "❌"
                         print(f"  {status_icon} {step['name']}: {step['status']}")
                         if step.get('message'):
                             print(f"      {step['message']}")
@@ -583,7 +606,6 @@ Examples:
                     print(json.dumps(result, indent=2))
                 else:
                     print(f"\nRevocation Status Check")
-                    print("=" * 50)
                     print(f"Certificate: {result['subject']}")
                     print(f"Serial: {result['serial']}")
                     print(f"Status: {result['status'].upper()}")
@@ -707,7 +729,6 @@ Examples:
                         print(f"{c['serial_hex']},{c['subject']},{c['issuer']},{c['not_before']},{c['not_after']},{c['status']}")
                 else:
                     print(f"{'SERIAL':<20} {'SUBJECT':<35} {'STATUS':<10} {'EXPIRES':<20}")
-                    print("=" * 100)
                     for c in certs:
                         serial = c['serial_hex'][:18] + "..." if len(c['serial_hex']) > 18 else c['serial_hex']
                         subject = c['subject'][:32] + "..." if len(c['subject']) > 32 else c['subject']
@@ -824,6 +845,15 @@ Examples:
                 success = db.revoke_certificate(serial_hex, args.reason)
                 
                 if success:
+                    # Also add to compromised_keys table
+                    from cryptography.hazmat.primitives import serialization
+                    public_key_der = cert.public_key().public_bytes(
+                        encoding=serialization.Encoding.DER,
+                        format=serialization.PublicFormat.SubjectPublicKeyInfo
+                    )
+                    public_key_hash = hashlib.sha256(public_key_der).hexdigest()
+                    db.add_compromised_key(public_key_hash, serial_hex, args.reason)
+                    
                     audit_log("key_compromise", "success", f"Private key compromised for certificate {serial_hex}", {"serial": serial_hex, "subject": cert.subject.rfc4514_string(), "reason": args.reason})
                     
                     # Generate emergency CRL

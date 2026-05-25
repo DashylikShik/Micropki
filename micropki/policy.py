@@ -88,6 +88,14 @@ class PolicyEnforcer:
                 return False, f"Wildcard SAN '{value}' not allowed"
         return True, ""
     
+    def check_signature_algorithm(self, signature_algorithm_oid) -> Tuple[bool, str]:
+        """Check if signature algorithm meets security requirements (POL-6)."""
+        algo_str = str(signature_algorithm_oid).lower()
+        # SHA-1 is forbidden
+        if 'sha1' in algo_str:
+            return False, "SHA-1 signature algorithm is forbidden. Use SHA-256 or stronger."
+        return True, ""
+    
     def enforce_issuance_policy(self, public_key, validity_days: int, template: TemplateType,
                                  san_list: List[Tuple], is_ca: bool = False, is_root: bool = False) -> Tuple[bool, str]:
         valid, msg = self.check_key_size(public_key, is_ca, is_root)

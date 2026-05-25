@@ -35,12 +35,7 @@ class CertificateDatabase:
         return conn
     
     def init_schema(self, force: bool = False) -> None:
-        """
-        Initialize database schema.
-        
-        Args:
-            force: If True, drop existing tables and recreate
-        """
+        """Initialize database schema."""
         self.logger.info(f"Initializing database schema: {self.db_path}")
         
         with self._get_connection() as conn:
@@ -48,6 +43,7 @@ class CertificateDatabase:
                 conn.execute("DROP TABLE IF EXISTS certificates")
                 conn.execute("DROP TABLE IF EXISTS serial_tracker")
                 conn.execute("DROP TABLE IF EXISTS crl_metadata")
+                conn.execute("DROP TABLE IF EXISTS compromised_keys")
                 self.logger.info("Dropped existing tables")
             
             # Certificates table
@@ -77,7 +73,7 @@ class CertificateDatabase:
                 )
             """)
             
-            # CRL metadata table (Sprint 4)
+            # CRL metadata table
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS crl_metadata (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,11 +85,24 @@ class CertificateDatabase:
                 )
             """)
             
+            # ============= SPRINT 7: compromised_keys table (DB-10) =============
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS compromised_keys (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    public_key_hash TEXT UNIQUE NOT NULL,
+                    certificate_serial TEXT NOT NULL,
+                    compromise_date TEXT NOT NULL,
+                    compromise_reason TEXT NOT NULL,
+                    FOREIGN KEY (certificate_serial) REFERENCES certificates(serial_hex)
+                )
+            """)
+            
             # Create indexes
             conn.execute("CREATE INDEX IF NOT EXISTS idx_serial_hex ON certificates(serial_hex)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON certificates(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_not_after ON certificates(not_after)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_ca_subject ON crl_metadata(ca_subject)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_compromised_keys_hash ON compromised_keys(public_key_hash)")
             
             self.logger.info("Database schema initialized successfully")
 
@@ -342,3 +351,23 @@ class CertificateDatabase:
                 cursor = conn.execute("SELECT COUNT(*) as count FROM certificates")
             
             return cursor.fetchone()['count']
+        
+    def add_compromised_key(self, public_key_hash: str, certificate_serial: str, reason: str) -> bool:
+        """Add a compromised key to the database (DB-10)."""
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO compromised_keys (public_key_hash, certificate_serial, compromise_date, compromise_reason)
+                    VALUES (?, ?, ?, ?)
+                """, (public_key_hash, certificate_serial, now, reason))
+                return True
+        except sqlite3.IntegrityError:
+            self.logger.warning(f"Public key hash already in compromised_keys: {public_key_hash}")
+            return False
+    
+    def is_key_compromised(self, public_key_hash: str) -> bool:
+        """Check if a public key is compromised (CTL-4)."""
+        with self._get_connection() as conn:
+            cursor = conn.execute("SELECT 1 FROM compromised_keys WHERE public_key_hash = ?", (public_key_hash,))
+            return cursor.fetchone() is not None
