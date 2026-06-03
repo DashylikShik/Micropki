@@ -1,10 +1,8 @@
 # MicroPKI
-
-A minimal Public Key Infrastructure (PKI) implementation for educational purposes.
-
 ## Description
 
-MicroPKI is a command-line tool that creates a self-signed Root Certificate Authority (CA) with secure key storage, certificate generation, and audit logging.
+Минимальная учебная реализация PKI, разработанная для курса Applied Cryptography.  
+Включает Root/Intermediate CA, выпуск сертификатов, CRL, OCSP, Audit, CT log, TLS demo и Code Signing.
 
 ## Dependencies
 
@@ -13,29 +11,32 @@ MicroPKI is a command-line tool that creates a self-signed Root Certificate Auth
 
 ## Project Structure
 project_root/
-├── micropki/                     # Основной пакет
-│   ├── __init__.py
-│   ├── ca.py                     # Операции с CA
-│   ├── certificates.py           # Работа с X.509 сертификатами
-│   ├── crypto_utils.py           # Криптографические утилиты
-│   ├── logger.py                 # Логирование
-│   ├── csr.py                    # Генерация и обработка CSR
-│   ├── templates.py              # Шаблоны сертификатов
-│   ├── san.py                    # Парсинг Subject Alternative Names
-│   ├── chain.py                  # Валидация цепочек сертификатов
-│   └── cli.py                    # Интерфейс командной строки
-├── tests/                        # Тесты
-│   ├── test_ca.py                # Тесты CA
-│   ├── test_certificates.py      # Тесты сертификатов
-│   ├── test_crypto_utils.py      # Тесты крипто-утилит
-│   ├── test_negative_scenarios.py # Негативные сценарии
-│   └── test_sprint2.py           # Тесты Sprint 2
-├── secrets/                      # Файлы с паролями (не в Git)
-├── logs/                         # Лог-файлы
-├── pki/                          # Сгенерированные сертификаты и ключи
-├── requirements.txt              # Зависимости
-├── setup.py                      # Установка пакета
-└── README.md                     # Этот файл
+├── micropki/ # Основной пакет
+│ ├── init.py
+│ ├── ca.py # Операции с CA
+│ ├── certificates.py # Работа с X.509 сертификатами
+│ ├── crypto_utils.py # Криптографические утилиты
+│ ├── logger.py # Логирование
+│ ├── csr.py # Генерация и обработка CSR
+│ ├── templates.py # Шаблоны сертификатов
+│ ├── san.py # Парсинг Subject Alternative Names
+│ ├── chain.py # Валидация цепочек сертификатов
+│ └── cli.py # Интерфейс командной строки
+├── tests/ # Тесты
+│ ├── test_ca.py
+│ ├── test_certificates.py
+│ ├── test_crypto_utils.py
+│ ├── test_negative_scenarios.py
+│ └── test_sprint2.py
+├── secrets/
+├── logs/ # Лог-файлы
+├── pki/ # Сгенерированные сертификаты и ключи
+├── demo/ # Скрипты для демонстрации Sprint 8
+│ ├── demo.bat # Windows demo
+│ └── demo.sh # Linux/Mac demo
+├── requirements.txt # Зависимости
+├── setup.py # Установка пакета
+└── README.md
 
 ## Build Instructions
 
