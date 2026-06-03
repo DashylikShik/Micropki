@@ -12,9 +12,8 @@ class TestCompromiseSimulation:
     """Test compromise simulation."""
     
     @pytest.fixture
-    def temp_dir(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield tmpdir
+    def temp_dir(self, tmp_path):
+        return str(tmp_path)
     
     @pytest.fixture
     def setup_ca(self, temp_dir):

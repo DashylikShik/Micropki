@@ -15,9 +15,8 @@ class TestSprint7Integration:
     """Integration tests for all Sprint 7 features."""
     
     @pytest.fixture
-    def temp_dir(self):
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield tmpdir
+    def temp_dir(self, tmp_path):
+        return str(tmp_path)
     
     def test_policy_violation_blocked(self, temp_dir):
         """Test that policy violations are blocked."""

@@ -292,3 +292,44 @@ micropki ca compromise --cert pki/certs/example.com.cert.pem --reason keyComprom
 
 # 5. Проверить list-certs (статус revoked)
 micropki ca list-certs --format table
+
+micropki audit ct-verify --cert pki\certs\example.com.cert.pem
+micropki ca compromise --cert pki\certs\example.com.cert.pem --reason keyCompromise
+micropki ca list-certs --format table
+
+# Sprint 8:
+Демо-сертификат
+micropki ca issue-cert --ca-cert pki\certs\intermediate.cert.pem --ca-key pki\private\intermediate.key.pem --ca-pass-file secrets\intermediate.pass --template server --subject "CN=demo.example.com" --san dns:demo.example.com --out-dir pki\certs --validity-days 365 --db-path pki\micropki.db
+
+openssl s_server -cert pki\certs\demo.example.com.cert.pem -key pki\certs\demo.example.com.key.pem -accept 8443
+в другом окне:
+openssl s_client -connect localhost:8443 -CAfile pki\certs\ca.cert.pem
+
+
+Выпуск сертификата Code Signing
+micropki ca issue-cert ^
+ --ca-cert pki\certs\intermediate.cert.pem ^
+ --ca-key pki\private\intermediate.key.pem ^
+ --ca-pass-file secrets\intermediate.pass ^
+ --template code_signing ^
+ --subject "CN=Code Signing" ^
+ --out-dir pki\certs ^
+ --validity-days 365 ^
+ --db-path pki\micropki.db
+
+ Создаём тестовый файл
+echo print("hello world") > demo.py
+
+Подписываем файл
+openssl dgst -sha256 ^
+ -sign pki\certs\Code_Signing.key.pem ^
+ -out demo.sig ^
+ demo.py
+
+ Получаем публичный ключ из сертификата
+openssl x509 -in pki\certs\Code_Signing.cert.pem -pubkey -noout > pubkey.pem
+Проверяем подпись
+openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
+
+demo\demo.bat
+demo/demo.sh

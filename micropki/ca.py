@@ -471,6 +471,8 @@ class CertificateAuthority:
         try:
             from micropki import san as san_module
             from micropki import templates
+            cert_pem_str = None
+            subject_dn = subject
             
             output_dir = out_dir
             os.makedirs(output_dir, exist_ok=True)
@@ -616,8 +618,14 @@ class CertificateAuthority:
             
             # Save certificate directly in output_dir
             cert_path = os.path.join(output_dir, f"{filename}.cert.pem")
+            cert_pem_bytes = certificates.certificate_to_pem(cert)
+
+            # Записываем в файл
             with open(cert_path, 'wb') as f:
-                f.write(certificates.certificate_to_pem(cert))
+                f.write(cert_pem_bytes)
+
+            # Обязательно создаем строковую переменную для использования в DB и CT log
+            cert_pem_str = cert_pem_bytes.decode("utf-8")
             self.logger.info(f"Certificate saved to {cert_path}")
             
             # Save private key if generated
@@ -642,29 +650,34 @@ class CertificateAuthority:
             
             # Insert into database if configured
             if self.db:
-                # Read the certificate PEM
-                with open(cert_path, 'rb') as f:
-                    cert_pem = f.read()
-                cert_pem_str = cert_pem.decode('utf-8')
                 
                 self._insert_certificate_to_db(
                     cert=cert,
                     cert_pem=cert_pem_str,
-                    subject=parsed_subject,
+                    subject=subject_dn,
                     issuer=ca_cert.subject.rfc4514_string(),
                     status='valid'
                 )
             
             #  SPRINT 7: Add to CT log (CTL-2)
-            from micropki.transparency import ct_add_entry
-            ct_add_entry(hex(serial_number)[2:].upper(), parsed_subject, cert_pem_str)
-            #  END SPRINT 7 
+            from micropki.transparency import ct_add_entry, get_ct_log, init_ct_log
+
+            if get_ct_log() is None:
+                init_ct_log("./pki")
+
+            ct_add_entry(
+                hex(serial_number)[2:].upper(),
+                subject_dn,
+                cert_pem_str,
+                ca_cert.subject.rfc4514_string()
+            )
+            # END SPRINT 7
             
             # Audit log success
             audit_log(
                 operation="issue_certificate",
                 status="success",
-                message=f"Certificate issued: {parsed_subject}",
+                message=f"Certificate issued: {subject_dn}",
                 metadata={"serial": hex(serial_number), "template": template_name}
             )
             

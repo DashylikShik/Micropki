@@ -1,29 +1,17 @@
-# Python build
-*.egg-info/
-*.egg
-__pycache__/
-
-# PKI generated files
 pki/
+pki2/
 secrets/
 logs/
 *.db
 *.sqlite
-*.sqlite3
-
-# Certificate and key files
-*.pem
 *.key
-*.cert
+*.pem
+*.crt
 *.csr
 *.crl
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*~
-
-# OS
-.DS_Store
-Thumbs.db
+*.sig
+micropki.egg-info/
+__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
