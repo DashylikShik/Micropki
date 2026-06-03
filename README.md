@@ -332,5 +332,26 @@ openssl x509 -in pki\certs\Code_Signing.cert.pem -pubkey -noout > pubkey.pem
 Проверяем подпись
 openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
 
+
+TLS Demo
+Запуск TLS сервера:
+openssl s_server -cert pki/certs/demo.example.com.cert.pem -key pki/certs/demo.example.com.key.pem -accept 8443
+Подключение клиента:
+openssl s_client -connect localhost:8443 -CAfile pki/certs/ca.cert.pem
+
+Verify return code: 0 (ok) — успешная проверка TLS.
+
+Code Signing Demo
+Подписываем файл:
+openssl dgst -sha256 -sign pki/certs/Code_Signing.key.pem -out demo.sig demo.py
+Проверка подписи:
+openssl x509 -in pki/certs/Code_Signing.cert.pem -pubkey -noout > pubkey.pem
+openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
+Проверка на изменённом файле:
+echo hacked >> demo.py
+openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
+
+Ожидаемый результат: Verification Failure
+
 demo\demo.bat
 demo/demo.sh
