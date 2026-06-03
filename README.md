@@ -38,6 +38,31 @@ project_root/
 ├── setup.py # Установка пакета
 └── README.md
 
+Architecture Diagram:
+## Архитектура проекта
+
+```text
+                Root CA
+                    │
+                    ▼
+           Intermediate CA
+                    │
+      ┌─────────────┼─────────────┐
+      ▼             ▼             ▼
+ Server Cert   Client Cert   Code Signing Cert
+
+                    │
+                    ▼
+            SQLite Database
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+      CRL         OCSP       CT Log
+                    │
+                    ▼
+               Audit Log
+```
+
 ## Build Instructions
 
 1. Clone the repository:
@@ -95,6 +120,9 @@ micropki ca verify-key --key pki\private\ca.key.pem --passphrase-file secrets\ca
 
 9. Запуск тестов
 pytest tests -v
+
+Для проверки покрытия:
+pytest --cov=micropki
 
 
 # sprint 2
@@ -236,6 +264,11 @@ curl -X POST http://127.0.0.1:8081/ocsp -d "serial=DC20DFE9143ED10AF7BF926D3CD0F
 # 5.Проверка несуществующего сертификата
 curl -X POST http://127.0.0.1:8081/ocsp -d "serial=1111111111111111"
 
+- OSC-4 — разбор DER-кодированных OCSP запросов
+- OSC-5 — генерация подписанного DER OCSP ответа
+- OSC-7 — поддержка Nonce
+- REV-2 — проверка подписи OCSP ответа на стороне клиента
+
 # Sprint 6:
 # Создать Root CA (если нет)
 micropki ca init --subject "CN=Root CA" --key-type rsa --key-size 4096 --passphrase-file secrets/ca.pass --out-dir pki --validity-days 365 --force
@@ -353,5 +386,24 @@ openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
 
 Ожидаемый результат: Verification Failure
 
+### POL-7
+
+Промежуточный CA создаётся с параметром:
+
+--pathlen 0
+
+что запрещает выпуск дополнительных Sub-Intermediate CA.
+
+## Code Signing Demo: Демонстрация подписи кода интегрирована в demo script.
+
+Скрипт:
+
+1. Выпускает сертификат Code Signing
+2. Подписывает файл demo.py
+3. Проверяет подпись
+4. Демонстрирует ошибку проверки после изменения файла
+
 demo\demo.bat
+
+chmod +x demo/demo.sh
 demo/demo.sh
