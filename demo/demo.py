@@ -37,7 +37,7 @@ PREV_AUDIT_HASH = "0" * 64
 
 
 def step(text):
-    print(f"\n==> {text}")
+    print(f"\n-> {text}")
 
 
 def ok(text):
@@ -378,10 +378,8 @@ def cleanup():
 def main():
     try:
         step("MicroPKI full video demo: Sprint 1 → Sprint 8")
-        explain("Это единый автоматический сценарий для записи видео защиты.")
         explain("Он сам создаёт PKI, выпускает сертификаты, запускает Repository/OCSP/TLS серверы,")
         explain("проверяет цепочку, отзыв, CRL, OCSP, TLS, Code Signing, Audit и Policy.")
-        explain("В консоль выводятся команды и результаты, чтобы не вводить их вручную во время записи.")
 
         step("Очистка старого состояния и создание demo/out")
         if OUT.exists():
