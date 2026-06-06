@@ -1,7 +1,7 @@
 # MicroPKI
 ## Description
 
-Минимальная учебная реализация PKI, разработанная для курса Applied Cryptography.  
+Минимальная учебная реализация PKI
 Включает Root/Intermediate CA, выпуск сертификатов, CRL, OCSP, Audit, CT log, TLS demo и Code Signing.
 
 ## Dependencies
@@ -63,6 +63,24 @@ Architecture Diagram:
                Audit Log
 ```
 
+## Features
+
+- Root CA
+- Intermediate CA
+- Certificate issuance
+- Certificate chain validation
+- CRL generation
+- Certificate revocation
+- OCSP responder
+- Repository HTTP server
+- Client CSR generation
+- Certificate request workflow
+- Audit logging
+- Policy enforcement
+- Certificate Transparency simulation
+- TLS integration
+- Code signing
+
 ## Build Instructions
 
 1. Clone the repository:
@@ -123,6 +141,7 @@ pytest tests -v
 
 Для проверки покрытия:
 pytest --cov=micropki
+![alt text](image.png)
 
 
 # sprint 2
@@ -340,7 +359,7 @@ openssl s_server -cert pki\certs\demo.example.com.cert.pem -key pki\certs\demo.e
 openssl s_client -connect localhost:8443 -CAfile pki\certs\ca.cert.pem
 
 
-Выпуск сертификата Code Signing
+# Выпуск сертификата Code Signing
 micropki ca issue-cert ^
  --ca-cert pki\certs\intermediate.cert.pem ^
  --ca-key pki\private\intermediate.key.pem ^
@@ -366,15 +385,16 @@ openssl x509 -in pki\certs\Code_Signing.cert.pem -pubkey -noout > pubkey.pem
 openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
 
 
-TLS Demo
+# TLS Demo
 Запуск TLS сервера:
 openssl s_server -cert pki/certs/demo.example.com.cert.pem -key pki/certs/demo.example.com.key.pem -accept 8443
 Подключение клиента:
 openssl s_client -connect localhost:8443 -CAfile pki/certs/ca.cert.pem
-
 Verify return code: 0 (ok) — успешная проверка TLS.
+# Проверка TLS
+curl --cacert demo/out/pki/certs/root.cert.pem https://localhost:8443
 
-Code Signing Demo
+# Code Signing Demo
 Подписываем файл:
 openssl dgst -sha256 -sign pki/certs/Code_Signing.key.pem -out demo.sig demo.py
 Проверка подписи:
@@ -397,13 +417,32 @@ openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
 ## Code Signing Demo: Демонстрация подписи кода интегрирована в demo script.
 
 Скрипт:
-
 1. Выпускает сертификат Code Signing
 2. Подписывает файл demo.py
 3. Проверяет подпись
 4. Демонстрирует ошибку проверки после изменения файла
+# Подпись файла demo.py
+openssl dgst -sha256 -sign demo/out/pki/private/code_signing.key.pem -out demo.sig demo.py
+openssl x509 -in demo/out/pki/certs/code_signing.cert.pem -pubkey -noout > pubkey.pem
+# Проверка подписи
+openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
+# Проверка после изменения
+echo hacked >> demo.py
+openssl dgst -sha256 -verify pubkey.pem -signature demo.sig demo.py
 
-demo\demo.bat
+## Audit log:
+# Проверка целостности hash-chain
+cat demo/out/pki/audit/audit.log
+
 
 chmod +x demo/demo.sh
 demo/demo.sh
+# Пояснение каждого шага:
+# - Создание Root и Intermediate CA
+# - Выпуск серверных и клиентских сертификатов
+# - Выдача OCSP и code signing сертификатов
+# - Запуск репозитория и OCSP responder
+# - Валидация цепочки и revocation
+# - TLS соединение
+# - Подпись и проверка demo.py
+# - Политика и audit log

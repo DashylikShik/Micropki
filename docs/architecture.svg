@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="520" viewBox="0 0 980 520">
+  <defs><style>.box{fill:#eef6ff;stroke:#1f4e79;stroke-width:2;rx:10}.store{fill:#fff8dc;stroke:#8a6d3b;stroke-width:2}.txt{font-family:Arial,sans-serif;font-size:16px}.title{font-size:22px;font-weight:bold}.small{font-size:13px}.arrow{stroke:#333;stroke-width:2;marker-end:url(#m)} </style><marker id="m" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#333"/></marker></defs>
+  <text x="390" y="34" class="title">MicroPKI Architecture</text>
+  <rect x="40" y="70" width="150" height="70" class="box"/><text x="78" y="100" class="txt">CLI</text><text x="60" y="122" class="small">ca/client/audit</text>
+  <rect x="280" y="55" width="180" height="90" class="box"/><text x="316" y="90" class="txt">Root CA</text><text x="300" y="116" class="small">self-signed trust anchor</text>
+  <rect x="280" y="200" width="180" height="90" class="box"/><text x="300" y="235" class="txt">Intermediate CA</text><text x="305" y="260" class="small">issues end-entity certs</text>
+  <rect x="560" y="70" width="160" height="70" class="box"/><text x="594" y="102" class="txt">Repository</text><text x="585" y="124" class="small">certs / CRLs / AIA</text>
+  <rect x="560" y="190" width="160" height="70" class="box"/><text x="600" y="222" class="txt">OCSP</text><text x="585" y="244" class="small">status responses</text>
+  <rect x="560" y="320" width="160" height="70" class="box"/><text x="590" y="352" class="txt">TLS Server</text><text x="580" y="374" class="small">issued server cert</text>
+  <rect x="780" y="320" width="150" height="70" class="box"/><text x="818" y="352" class="txt">Client</text><text x="805" y="374" class="small">validation + revocation</text>
+  <rect x="60" y="210" width="140" height="60" class="store"/><text x="90" y="245" class="txt">Database</text>
+  <rect x="60" y="320" width="140" height="60" class="store"/><text x="92" y="352" class="txt">Audit log</text><text x="83" y="374" class="small">hash chain</text>
+  <rect x="280" y="360" width="180" height="80" class="box"/><text x="305" y="392" class="txt">Code Signing</text><text x="298" y="416" class="small">sign / verify artifacts</text>
+  <line x1="190" y1="105" x2="280" y2="100" class="arrow"/><line x1="370" y1="145" x2="370" y2="200" class="arrow"/><line x1="460" y1="245" x2="560" y2="225" class="arrow"/><line x1="460" y1="245" x2="560" y2="105" class="arrow"/><line x1="640" y1="260" x2="640" y2="320" class="arrow"/><line x1="720" y1="355" x2="780" y2="355" class="arrow"/><line x1="780" y1="340" x2="720" y2="225" class="arrow"/><line x1="190" y1="240" x2="280" y2="245" class="arrow"/><line x1="190" y1="350" x2="280" y2="255" class="arrow"/><line x1="460" y1="400" x2="780" y2="375" class="arrow"/>
+</svg>
